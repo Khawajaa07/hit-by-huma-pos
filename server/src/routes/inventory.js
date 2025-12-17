@@ -13,12 +13,18 @@ router.get('/', async (req, res, next) => {
     const { locationId, search, lowStock, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
     
+    // Start from product_variants and LEFT JOIN to inventory so we see all variants
+    // including those with no inventory record (out of stock)
     let whereClause = 'WHERE pv.is_active = true AND p.is_active = true';
     const params = [];
     let paramIndex = 1;
     
+    // For location filter, we need to handle variants without inventory differently
+    let locationJoin = 'CROSS JOIN locations l';
+    let inventoryJoin = 'LEFT JOIN inventory i ON pv.variant_id = i.variant_id AND i.location_id = l.location_id';
+    
     if (locationId) {
-      whereClause += ` AND i.location_id = $${paramIndex++}`;
+      whereClause += ` AND l.location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
     
@@ -29,19 +35,23 @@ router.get('/', async (req, res, next) => {
     }
     
     if (lowStock === 'true') {
-      whereClause += ' AND i.quantity_on_hand <= i.reorder_level';
+      whereClause += ' AND COALESCE(i.quantity_on_hand, 0) <= COALESCE(i.reorder_level, 5) AND COALESCE(i.quantity_on_hand, 0) > 0';
     }
     
-    // Get inventory items
+    // Get inventory items - use LEFT JOIN to include variants without inventory records
     const result = await db.query(
-      `SELECT i.inventory_id, i.variant_id, i.location_id, i.quantity_on_hand, i.quantity_reserved, 
-              i.reorder_level, i.reorder_quantity, i.bin_location, i.updated_at,
+      `SELECT i.inventory_id, pv.variant_id, l.location_id, 
+              COALESCE(i.quantity_on_hand, 0) as quantity_on_hand, 
+              COALESCE(i.quantity_reserved, 0) as quantity_reserved, 
+              COALESCE(i.reorder_level, 5) as reorder_level, 
+              COALESCE(i.reorder_quantity, 10) as reorder_quantity, 
+              i.bin_location, i.updated_at,
               pv.sku, pv.barcode, pv.variant_name, pv.price, pv.cost_price,
               p.product_id, p.product_name, p.product_code, l.location_name
-       FROM inventory i
-       INNER JOIN product_variants pv ON i.variant_id = pv.variant_id
+       FROM product_variants pv
        INNER JOIN products p ON pv.product_id = p.product_id
-       INNER JOIN locations l ON i.location_id = l.location_id
+       ${locationJoin}
+       ${inventoryJoin}
        ${whereClause}
        ORDER BY p.product_name, pv.variant_name
        LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
@@ -50,13 +60,13 @@ router.get('/', async (req, res, next) => {
     
     // Transform to frontend format
     const inventory = result.recordset.map(item => ({
-      id: item.inventory_id,
+      id: item.inventory_id || `${item.variant_id}-${item.location_id}`,
       variantId: item.variant_id,
       locationId: item.location_id,
       quantity: item.quantity_on_hand,
-      reserved: item.quantity_reserved || 0,
-      reorderLevel: item.reorder_level || 5,
-      reorderQuantity: item.reorder_quantity || 10,
+      reserved: item.quantity_reserved,
+      reorderLevel: item.reorder_level,
+      reorderQuantity: item.reorder_quantity,
       binLocation: item.bin_location,
       updatedAt: item.updated_at,
       sku: item.sku,

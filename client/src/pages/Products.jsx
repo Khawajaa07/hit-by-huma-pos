@@ -26,7 +26,7 @@ export default function Products() {
   const [expandedProducts, setExpandedProducts] = useState(new Set());
 
   // Fetch products
-  const { data: productsData, isLoading } = useQuery({
+  const { data: productsData, isLoading, refetch } = useQuery({
     queryKey: ['products', searchQuery, selectedCategory],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -340,7 +340,7 @@ export default function Products() {
           categories={categories}
           onClose={handleCloseModal}
           onSave={() => {
-            queryClient.invalidateQueries(['products']);
+            refetch();
             handleCloseModal();
           }}
         />
