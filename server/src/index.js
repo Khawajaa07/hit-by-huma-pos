@@ -131,7 +131,11 @@ const startServer = async () => {
   try {
     // Run database migrations
     logger.info('Running database migrations...');
-    await migrate();
+    try {
+      await migrate();
+    } catch (migrationError) {
+      logger.warn('Migration encountered issues, continuing startup...', migrationError.message);
+    }
     
     // Connect to database
     await db.connect();

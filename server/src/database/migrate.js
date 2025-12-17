@@ -4,11 +4,12 @@ const { Pool } = require('pg');
 
 async function migrate() {
   console.log('🚀 Starting database migration...');
+  console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'set (hidden)' : 'not set');
   
   const config = process.env.DATABASE_URL 
     ? {
         connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
+        ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
       }
     : {
         host: process.env.DB_HOST || 'localhost',
@@ -18,9 +19,15 @@ async function migrate() {
         password: process.env.DB_PASSWORD || '',
       };
 
-  const pool = new Pool(config);
+  const pool = new Pool({
+    ...config,
+    connectionTimeoutMillis: 30000,
+    idleTimeoutMillis: 30000,
+  });
 
   try {
+    console.log('Connecting to database...');
+    
     // Read the schema file
     const schemaPath = path.join(__dirname, 'schema.postgres.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
@@ -31,7 +38,11 @@ async function migrate() {
     console.log('✅ Database migration completed successfully!');
   } catch (error) {
     console.error('❌ Migration failed:', error.message);
-    throw error;
+    // Don't throw in production - let the app start and retry connections
+    if (process.env.NODE_ENV !== 'production') {
+      throw error;
+    }
+    console.log('⚠️ Will continue startup - database may need manual migration');
   } finally {
     await pool.end();
   }
