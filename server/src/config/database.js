@@ -1,33 +1,38 @@
-const sql = require('mssql');
+const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
-// Cloud deployment uses SQL Server Authentication only
-// Windows Authentication (msnodesqlv8) is not available on Linux servers
-const config = {
-  server: process.env.DB_SERVER || 'localhost',
-  port: parseInt(process.env.DB_PORT) || 1433,
-  database: process.env.DB_NAME || 'HitByHumaPOS',
-  user: process.env.DB_USER || 'sa',
-  password: process.env.DB_PASSWORD || '',
-  options: {
-    encrypt: process.env.DB_ENCRYPT === 'true',
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-    enableArithAbort: true,
-  },
-  pool: {
-    max: 20,
-    min: 5,
-    idleTimeoutMillis: 30000,
-    acquireTimeoutMillis: 30000,
-  },
-};
+// PostgreSQL configuration
+// Railway provides DATABASE_URL automatically
+const config = process.env.DATABASE_URL 
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT) || 5432,
+      database: process.env.DB_NAME || 'hitbyhuma_pos',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || '',
+    };
 
 let pool = null;
 
 const connect = async () => {
   try {
-    pool = await sql.connect(config);
-    logger.info('Connected to SQL Server database');
+    pool = new Pool({
+      ...config,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 30000,
+    });
+    
+    // Test connection
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    
+    logger.info('Connected to PostgreSQL database');
     return pool;
   } catch (error) {
     logger.error('Database connection failed:', error);
@@ -38,7 +43,7 @@ const connect = async () => {
 const close = async () => {
   try {
     if (pool) {
-      await pool.close();
+      await pool.end();
       logger.info('Database connection closed');
     }
   } catch (error) {
@@ -56,46 +61,64 @@ const getPool = () => {
 
 // Transaction helper
 const transaction = async (callback) => {
-  const transaction = new sql.Transaction(pool);
+  const client = await pool.connect();
   try {
-    await transaction.begin();
-    const result = await callback(transaction);
-    await transaction.commit();
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
     return result;
   } catch (error) {
-    await transaction.rollback();
+    await client.query('ROLLBACK');
     throw error;
+  } finally {
+    client.release();
   }
 };
 
-// Query helper with automatic parameter binding
+// Query helper - converts @param syntax to $1, $2, etc for PostgreSQL
 const query = async (queryString, params = {}) => {
-  const request = pool.request();
+  // Convert named parameters (@param) to positional ($1, $2, etc)
+  const paramNames = Object.keys(params);
+  const paramValues = Object.values(params);
   
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === null || value === undefined) {
-      request.input(key, sql.NVarChar, null);
-    } else if (typeof value === 'number') {
-      if (Number.isInteger(value)) {
-        request.input(key, sql.Int, value);
-      } else {
-        request.input(key, sql.Decimal(18, 2), value);
-      }
-    } else if (typeof value === 'boolean') {
-      request.input(key, sql.Bit, value);
-    } else if (value instanceof Date) {
-      request.input(key, sql.DateTime2, value);
-    } else {
-      request.input(key, sql.NVarChar, value);
-    }
+  let convertedQuery = queryString;
+  paramNames.forEach((name, index) => {
+    // Replace @paramName with $n (PostgreSQL style)
+    const regex = new RegExp(`@${name}\\b`, 'g');
+    convertedQuery = convertedQuery.replace(regex, `$${index + 1}`);
   });
   
-  return request.query(queryString);
+  const result = await pool.query(convertedQuery, paramValues);
+  return {
+    recordset: result.rows,
+    recordsets: [result.rows],
+    rowsAffected: [result.rowCount],
+  };
+};
+
+// Compatibility layer for mssql-style pool.request()
+const request = () => {
+  const inputs = {};
+  
+  const req = {
+    input: function(name, typeOrValue, value) {
+      // For PostgreSQL, we just store the value (type is handled automatically)
+      inputs[name] = value !== undefined ? value : typeOrValue;
+      return req;
+    },
+    query: async function(queryString) {
+      return query(queryString, inputs);
+    },
+  };
+  
+  return req;
 };
 
 module.exports = {
-  sql,
-  pool: { request: () => pool?.request() },
+  pool: { 
+    request,
+    query: (q, p) => query(q, p),
+  },
   connect,
   close,
   getPool,

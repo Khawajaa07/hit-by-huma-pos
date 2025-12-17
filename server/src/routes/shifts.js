@@ -1,54 +1,54 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 const { ValidationError, NotFoundError } = require('../middleware/errorHandler');
 
 const router = express.Router();
+router.use(authenticate);
 
-// Get current open shift for user
-router.get('/current', authenticate, async (req, res, next) => {
+// Get current shift for user
+router.get('/current', async (req, res, next) => {
   try {
     const result = await db.query(
-      `SELECT s.*, l.LocationCode, l.LocationName
-       FROM Shifts s
-       INNER JOIN Locations l ON s.LocationID = l.LocationID
-       WHERE s.UserID = @userId AND s.Status = 'OPEN'`,
-      { userId: req.user.UserID }
+      `SELECT s.*, l.location_name
+       FROM shifts s
+       INNER JOIN locations l ON s.location_id = l.location_id
+       WHERE s.user_id = @userId AND s.status = 'active'
+       ORDER BY s.start_time DESC
+       LIMIT 1`,
+      { userId: req.user.user_id }
     );
     
     if (result.recordset.length === 0) {
-      return res.json({ hasOpenShift: false });
+      return res.json({ hasActiveShift: false });
     }
     
-    // Get shift sales summary
-    const salesResult = await db.query(
+    // Get shift stats
+    const shift = result.recordset[0];
+    const statsResult = await db.query(
       `SELECT 
-        COUNT(*) AS TransactionCount,
-        COALESCE(SUM(TotalAmount), 0) AS TotalSales,
-        COALESCE(SUM(CASE WHEN sp.MethodType = 'CASH' THEN sp.Amount ELSE 0 END), 0) AS CashTotal,
-        COALESCE(SUM(CASE WHEN sp.MethodType = 'CARD' THEN sp.Amount ELSE 0 END), 0) AS CardTotal
-       FROM Sales s
-       LEFT JOIN SalePayments sp ON s.SaleID = sp.SaleID
-       LEFT JOIN PaymentMethods pm ON sp.PaymentMethodID = pm.PaymentMethodID
-       WHERE s.ShiftID = @shiftId AND s.Status = 'COMPLETED'`,
-      { shiftId: result.recordset[0].ShiftID }
+        COUNT(*) as transaction_count,
+        COALESCE(SUM(total_amount), 0) as total_sales
+       FROM sales
+       WHERE shift_id = @shiftId AND status = 'completed'`,
+      { shiftId: shift.shift_id }
     );
     
-    res.json({
-      hasOpenShift: true,
+    res.json({ 
+      hasActiveShift: true, 
       shift: {
-        ...result.recordset[0],
-        summary: salesResult.recordset[0],
-      },
+        ...shift,
+        ...statsResult.recordset[0]
+      }
     });
   } catch (error) {
     next(error);
   }
 });
 
-// Clock in (Start shift)
-router.post('/clock-in', authenticate, [
+// Clock in
+router.post('/clock-in', [
   body('locationId').isInt(),
   body('openingCash').isNumeric(),
 ], async (req, res, next) => {
@@ -58,42 +58,39 @@ router.post('/clock-in', authenticate, [
       throw new ValidationError('Validation failed', errors.array());
     }
     
-    const { locationId, openingCash, terminalNumber } = req.body;
+    const { locationId, openingCash, terminalId } = req.body;
     
-    // Check if user already has open shift
-    const existingShift = await db.query(
-      `SELECT ShiftID FROM Shifts WHERE UserID = @userId AND Status = 'OPEN'`,
-      { userId: req.user.UserID }
+    // Check for existing active shift
+    const existing = await db.query(
+      `SELECT shift_id FROM shifts WHERE user_id = @userId AND status = 'active'`,
+      { userId: req.user.user_id }
     );
     
-    if (existingShift.recordset.length > 0) {
-      throw new ValidationError('You already have an open shift. Please clock out first.');
+    if (existing.recordset.length > 0) {
+      throw new ValidationError('You already have an active shift');
     }
     
     const result = await db.query(
-      `INSERT INTO Shifts (UserID, LocationID, TerminalNumber, OpeningCash)
-       OUTPUT INSERTED.ShiftID
-       VALUES (@userId, @locationId, @terminalNumber, @openingCash)`,
-      {
-        userId: req.user.UserID,
-        locationId,
-        terminalNumber: terminalNumber || null,
-        openingCash,
+      `INSERT INTO shifts (user_id, location_id, terminal_id, opening_cash, status)
+       VALUES (@userId, @locationId, @terminalId, @openingCash, 'active')
+       RETURNING *`,
+      { 
+        userId: req.user.user_id, 
+        locationId, 
+        terminalId: terminalId || null, 
+        openingCash 
       }
     );
     
-    res.status(201).json({
-      success: true,
-      shiftId: result.recordset[0].ShiftID,
-      message: 'Shift started successfully',
-    });
+    res.status(201).json({ success: true, shift: result.recordset[0] });
   } catch (error) {
     next(error);
   }
 });
 
-// Clock out (End shift)
-router.post('/clock-out', authenticate, [
+// Clock out
+router.post('/clock-out', [
+  body('shiftId').isInt(),
   body('closingCash').isNumeric(),
 ], async (req, res, next) => {
   try {
@@ -102,70 +99,52 @@ router.post('/clock-out', authenticate, [
       throw new ValidationError('Validation failed', errors.array());
     }
     
-    const { closingCash, notes } = req.body;
+    const { shiftId, closingCash, notes } = req.body;
     
-    // Get open shift
+    // Get shift details and calculate expected cash
     const shiftResult = await db.query(
-      `SELECT s.*, l.LocationCode FROM Shifts s
-       INNER JOIN Locations l ON s.LocationID = l.LocationID
-       WHERE s.UserID = @userId AND s.Status = 'OPEN'`,
-      { userId: req.user.UserID }
+      `SELECT s.*, 
+        COALESCE(SUM(CASE WHEN pm.method_type = 'cash' THEN sp.amount ELSE 0 END), 0) as cash_sales
+       FROM shifts s
+       LEFT JOIN sales sl ON s.shift_id = sl.shift_id AND sl.status = 'completed'
+       LEFT JOIN sale_payments sp ON sl.sale_id = sp.sale_id
+       LEFT JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
+       WHERE s.shift_id = @shiftId
+       GROUP BY s.shift_id, s.user_id, s.location_id, s.terminal_id, s.opening_cash, 
+                s.closing_cash, s.expected_cash, s.cash_difference, s.start_time, 
+                s.end_time, s.status, s.notes, s.created_at`,
+      { shiftId }
     );
     
     if (shiftResult.recordset.length === 0) {
-      throw new NotFoundError('Open shift');
+      throw new NotFoundError('Shift not found');
     }
     
     const shift = shiftResult.recordset[0];
+    const expectedCash = shift.opening_cash + shift.cash_sales;
+    const cashDifference = closingCash - expectedCash;
     
-    // Calculate expected cash
-    const salesResult = await db.query(
-      `SELECT 
-        COALESCE(SUM(CASE WHEN pm.MethodType = 'CASH' THEN sp.Amount ELSE 0 END), 0) AS CashIn,
-        COALESCE(SUM(CASE WHEN pm.MethodType = 'CASH' AND sp.ChangeAmount > 0 THEN sp.ChangeAmount ELSE 0 END), 0) AS CashOut
-       FROM Sales s
-       INNER JOIN SalePayments sp ON s.SaleID = sp.SaleID
-       INNER JOIN PaymentMethods pm ON sp.PaymentMethodID = pm.PaymentMethodID
-       WHERE s.ShiftID = @shiftId AND s.Status = 'COMPLETED'`,
-      { shiftId: shift.ShiftID }
+    const result = await db.query(
+      `UPDATE shifts SET 
+        closing_cash = @closingCash,
+        expected_cash = @expectedCash,
+        cash_difference = @cashDifference,
+        end_time = CURRENT_TIMESTAMP,
+        status = 'closed',
+        notes = @notes
+       WHERE shift_id = @shiftId
+       RETURNING *`,
+      { shiftId, closingCash, expectedCash, cashDifference, notes: notes || null }
     );
     
-    const cashIn = salesResult.recordset[0].CashIn || 0;
-    const cashOut = salesResult.recordset[0].CashOut || 0;
-    const expectedCash = shift.OpeningCash + cashIn - cashOut;
-    const variance = closingCash - expectedCash;
-    
-    await db.query(
-      `UPDATE Shifts SET
-        ClosingCash = @closingCash,
-        ExpectedCash = @expectedCash,
-        CashVariance = @variance,
-        Status = 'CLOSED',
-        ClockOutAt = GETDATE(),
-        Notes = @notes
-       WHERE ShiftID = @shiftId`,
-      {
-        shiftId: shift.ShiftID,
-        closingCash,
-        expectedCash,
-        variance,
-        notes: notes || null,
-      }
-    );
-    
-    res.json({
-      success: true,
-      shiftId: shift.ShiftID,
+    res.json({ 
+      success: true, 
+      shift: result.recordset[0],
       summary: {
-        openingCash: shift.OpeningCash,
-        cashIn,
-        cashOut,
         expectedCash,
-        closingCash,
-        variance,
-        varianceStatus: Math.abs(variance) <= 500 ? 'OK' : 'FLAGGED',
-      },
-      message: 'Shift closed successfully',
+        actualCash: closingCash,
+        difference: cashDifference
+      }
     });
   } catch (error) {
     next(error);
@@ -173,46 +152,44 @@ router.post('/clock-out', authenticate, [
 });
 
 // Get shift history
-router.get('/history', authenticate, async (req, res, next) => {
+router.get('/history', async (req, res, next) => {
   try {
-    const { userId, locationId, startDate, endDate, page = 1, limit = 20 } = req.query;
+    const { userId, locationId, startDate, endDate, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
     
     let whereClause = 'WHERE 1=1';
-    const params = { offset, limit: parseInt(limit) };
+    const params = { limit: parseInt(limit), offset };
     
     if (userId) {
-      whereClause += ' AND s.UserID = @userId';
+      whereClause += ' AND s.user_id = @userId';
       params.userId = parseInt(userId);
     }
     
     if (locationId) {
-      whereClause += ' AND s.LocationID = @locationId';
+      whereClause += ' AND s.location_id = @locationId';
       params.locationId = parseInt(locationId);
     }
     
     if (startDate) {
-      whereClause += ' AND s.ClockInAt >= @startDate';
-      params.startDate = new Date(startDate);
+      whereClause += ' AND s.start_time >= @startDate';
+      params.startDate = startDate;
     }
     
     if (endDate) {
-      whereClause += ' AND s.ClockInAt <= @endDate';
-      params.endDate = new Date(endDate);
+      whereClause += ' AND s.start_time <= @endDate';
+      params.endDate = endDate;
     }
     
     const result = await db.query(
-      `SELECT s.*, 
-        u.FirstName, u.LastName, u.EmployeeCode,
-        l.LocationCode, l.LocationName,
-        (SELECT COUNT(*) FROM Sales WHERE ShiftID = s.ShiftID AND Status = 'COMPLETED') AS TransactionCount,
-        (SELECT COALESCE(SUM(TotalAmount), 0) FROM Sales WHERE ShiftID = s.ShiftID AND Status = 'COMPLETED') AS TotalSales
-       FROM Shifts s
-       INNER JOIN Users u ON s.UserID = u.UserID
-       INNER JOIN Locations l ON s.LocationID = l.LocationID
+      `SELECT s.*, u.first_name, u.last_name, l.location_name,
+        (SELECT COUNT(*) FROM sales WHERE shift_id = s.shift_id AND status = 'completed') as transaction_count,
+        (SELECT COALESCE(SUM(total_amount), 0) FROM sales WHERE shift_id = s.shift_id AND status = 'completed') as total_sales
+       FROM shifts s
+       INNER JOIN users u ON s.user_id = u.user_id
+       INNER JOIN locations l ON s.location_id = l.location_id
        ${whereClause}
-       ORDER BY s.ClockInAt DESC
-       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,
+       ORDER BY s.start_time DESC
+       LIMIT @limit OFFSET @offset`,
       params
     );
     
@@ -222,93 +199,69 @@ router.get('/history', authenticate, async (req, res, next) => {
   }
 });
 
-// Get shift details
-router.get('/:id', authenticate, async (req, res, next) => {
+// Get shift by ID
+router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     
     const shiftResult = await db.query(
-      `SELECT s.*, 
-        u.FirstName, u.LastName, u.EmployeeCode,
-        l.LocationCode, l.LocationName
-       FROM Shifts s
-       INNER JOIN Users u ON s.UserID = u.UserID
-       INNER JOIN Locations l ON s.LocationID = l.LocationID
-       WHERE s.ShiftID = @id`,
+      `SELECT s.*, u.first_name, u.last_name, l.location_name
+       FROM shifts s
+       INNER JOIN users u ON s.user_id = u.user_id
+       INNER JOIN locations l ON s.location_id = l.location_id
+       WHERE s.shift_id = @id`,
       { id: parseInt(id) }
     );
     
     if (shiftResult.recordset.length === 0) {
-      throw new NotFoundError('Shift');
+      throw new NotFoundError('Shift not found');
     }
     
-    // Get sales breakdown
+    // Get sales summary
     const salesResult = await db.query(
       `SELECT 
-        COUNT(*) AS TransactionCount,
-        COALESCE(SUM(TotalAmount), 0) AS TotalSales,
-        COALESCE(SUM(DiscountAmount), 0) AS TotalDiscounts,
-        (SELECT COUNT(*) FROM Sales WHERE ShiftID = @id AND Status = 'VOIDED') AS VoidCount,
-        (SELECT COUNT(*) FROM Returns r INNER JOIN Sales s ON r.OriginalSaleID = s.SaleID WHERE s.ShiftID = @id) AS ReturnCount
-       FROM Sales
-       WHERE ShiftID = @id AND Status = 'COMPLETED'`,
+        COUNT(*) as transaction_count,
+        COALESCE(SUM(total_amount), 0) as total_sales,
+        COALESCE(SUM(discount_amount), 0) as total_discounts
+       FROM sales
+       WHERE shift_id = @id AND status = 'completed'`,
       { id: parseInt(id) }
     );
     
-    // Get payment breakdown
+    // Get payments by method
     const paymentsResult = await db.query(
-      `SELECT pm.MethodName, pm.MethodType, COALESCE(SUM(sp.Amount), 0) AS Total
-       FROM SalePayments sp
-       INNER JOIN PaymentMethods pm ON sp.PaymentMethodID = pm.PaymentMethodID
-       INNER JOIN Sales s ON sp.SaleID = s.SaleID
-       WHERE s.ShiftID = @id AND s.Status = 'COMPLETED'
-       GROUP BY pm.MethodName, pm.MethodType`,
+      `SELECT pm.method_name, COALESCE(SUM(sp.amount), 0) as total
+       FROM sale_payments sp
+       INNER JOIN sales s ON sp.sale_id = s.sale_id
+       INNER JOIN payment_methods pm ON sp.payment_method_id = pm.payment_method_id
+       WHERE s.shift_id = @id AND s.status = 'completed'
+       GROUP BY pm.method_name`,
       { id: parseInt(id) }
     );
     
     res.json({
       shift: shiftResult.recordset[0],
-      salesSummary: salesResult.recordset[0],
-      paymentBreakdown: paymentsResult.recordset,
+      summary: salesResult.recordset[0],
+      paymentBreakdown: paymentsResult.recordset
     });
   } catch (error) {
     next(error);
   }
 });
 
-// Reconcile shift (Manager only)
-router.post('/:id/reconcile', authenticate, authorize('shifts.reconcile'), async (req, res, next) => {
+// Reconcile shift
+router.post('/:id/reconcile', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
     
-    const shift = await db.query(
-      'SELECT ShiftID, Status FROM Shifts WHERE ShiftID = @id',
-      { id: parseInt(id) }
-    );
-    
-    if (shift.recordset.length === 0) {
-      throw new NotFoundError('Shift');
-    }
-    
-    if (shift.recordset[0].Status !== 'CLOSED') {
-      throw new ValidationError('Only closed shifts can be reconciled');
-    }
-    
     await db.query(
-      `UPDATE Shifts SET 
-        Status = 'RECONCILED',
-        ReconciliationNotes = @notes,
-        ReconciliationBy = @userId
-       WHERE ShiftID = @id`,
-      {
-        id: parseInt(id),
-        notes: notes || null,
-        userId: req.user.UserID,
-      }
+      `UPDATE shifts SET status = 'reconciled', notes = COALESCE(@notes, notes)
+       WHERE shift_id = @id`,
+      { id: parseInt(id), notes }
     );
     
-    res.json({ success: true, message: 'Shift reconciled successfully' });
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }

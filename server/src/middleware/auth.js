@@ -13,15 +13,15 @@ const authenticate = async (req, res, next) => {
     
     const token = authHeader.split(' ')[1];
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key');
     
     // Get user from database
     const result = await db.query(
-      `SELECT u.*, r.RoleName, r.Permissions, l.LocationCode, l.LocationName
-       FROM Users u
-       LEFT JOIN Roles r ON u.RoleID = r.RoleID
-       LEFT JOIN Locations l ON u.PrimaryLocationID = l.LocationID
-       WHERE u.UserID = @userId AND u.IsActive = 1`,
+      `SELECT u.*, r.role_name, r.permissions, l.location_code, l.location_name
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.role_id
+       LEFT JOIN locations l ON u.default_location_id = l.location_id
+       WHERE u.user_id = @userId AND u.is_active = true`,
       { userId: decoded.userId }
     );
     
@@ -30,7 +30,16 @@ const authenticate = async (req, res, next) => {
     }
     
     req.user = result.recordset[0];
-    req.user.Permissions = JSON.parse(req.user.Permissions || '[]');
+    
+    // Parse permissions safely
+    try {
+      req.user.permissions = typeof req.user.permissions === 'string' 
+        ? JSON.parse(req.user.permissions) 
+        : (req.user.permissions || {});
+    } catch (e) {
+      req.user.permissions = {};
+    }
+    
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
@@ -47,21 +56,21 @@ const authorize = (...requiredPermissions) => {
       return next(new UnauthorizedError('Authentication required'));
     }
     
-    const userPermissions = req.user.Permissions;
+    const userPermissions = req.user.permissions;
     
     // Admin has all permissions
-    if (userPermissions.includes('*')) {
+    if (userPermissions.all === true || userPermissions['*']) {
       return next();
     }
     
     // Check if user has any of the required permissions
     const hasPermission = requiredPermissions.some(permission => {
       // Check exact match
-      if (userPermissions.includes(permission)) return true;
+      if (userPermissions[permission]) return true;
       
-      // Check wildcard (e.g., 'pos.*' matches 'pos.sale')
-      const wildcardPermission = permission.split('.')[0] + '.*';
-      return userPermissions.includes(wildcardPermission);
+      // Check wildcard
+      const category = permission.split('.')[0];
+      return userPermissions[category] === true;
     });
     
     if (!hasPermission) {
@@ -83,15 +92,15 @@ const verifyManagerPIN = async (req, res, next) => {
     
     // Find manager with this PIN at the same location
     const result = await db.query(
-      `SELECT u.UserID, u.FirstName, u.LastName, r.RoleName
-       FROM Users u
-       INNER JOIN Roles r ON u.RoleID = r.RoleID
-       WHERE u.ManagerPIN = @pin 
-         AND u.IsActive = 1
-         AND (u.PrimaryLocationID = @locationId OR r.RoleName = 'Admin')`,
+      `SELECT u.user_id, u.first_name, u.last_name, r.role_name
+       FROM users u
+       INNER JOIN roles r ON u.role_id = r.role_id
+       WHERE u.pin_hash = @pin 
+         AND u.is_active = true
+         AND (u.default_location_id = @locationId OR r.role_name = 'admin')`,
       { 
         pin: managerPIN,
-        locationId: req.user.PrimaryLocationID
+        locationId: req.user.default_location_id
       }
     );
     

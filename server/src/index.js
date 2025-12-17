@@ -7,6 +7,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 
 const db = require('./config/database');
+const migrate = require('./database/migrate');
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
 
@@ -79,7 +80,7 @@ app.use(`${API_PREFIX}/hardware`, hardwareRoutes);
 // Health Check
 app.get('/health', async (req, res) => {
   try {
-    await db.pool.request().query('SELECT 1');
+    await db.query('SELECT 1');
     res.json({ 
       status: 'healthy', 
       timestamp: new Date().toISOString(),
@@ -128,6 +129,10 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
+    // Run database migrations
+    logger.info('Running database migrations...');
+    await migrate();
+    
     // Connect to database
     await db.connect();
     logger.info('Database connected successfully');

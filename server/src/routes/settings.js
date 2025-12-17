@@ -1,241 +1,195 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
+const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { ValidationError, NotFoundError } = require('../middleware/errorHandler');
 
 const router = express.Router();
+router.use(authenticate);
 
 // Get all settings
-router.get('/', authenticate, async (req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const result = await db.query(
-      `SELECT SettingKey, SettingValue, SettingType, Description, IsEditable
-       FROM SystemSettings
-       ORDER BY SettingKey`
+      `SELECT * FROM settings ORDER BY setting_key`
     );
     
+    // Convert to key-value object
     const settings = {};
-    result.recordset.forEach(row => {
-      let value = row.SettingValue;
-      
-      // Parse based on type
-      switch (row.SettingType) {
-        case 'number':
-          value = parseFloat(value);
-          break;
-        case 'boolean':
-          value = value === 'true';
-          break;
-        case 'json':
-          try {
-            value = JSON.parse(value);
-          } catch (e) {
-            // Keep as string if parse fails
-          }
-          break;
-      }
-      
-      settings[row.SettingKey] = {
-        value,
-        type: row.SettingType,
-        description: row.Description,
-        editable: row.IsEditable,
+    result.recordset.forEach(s => {
+      settings[s.setting_key] = {
+        value: s.setting_value,
+        type: s.setting_type,
+        description: s.description,
+        isPublic: s.is_public
       };
     });
     
-    res.json({ settings });
+    res.json(settings);
   } catch (error) {
     next(error);
   }
 });
 
-// Get single setting
-router.get('/:key', authenticate, async (req, res, next) => {
+// Get setting by key
+router.get('/:key', async (req, res, next) => {
   try {
     const { key } = req.params;
     
     const result = await db.query(
-      `SELECT SettingValue, SettingType FROM SystemSettings WHERE SettingKey = @key`,
+      `SELECT * FROM settings WHERE setting_key = @key`,
       { key }
     );
     
     if (result.recordset.length === 0) {
-      return res.json({ value: null });
+      throw new NotFoundError('Setting not found');
     }
     
-    let value = result.recordset[0].SettingValue;
-    const type = result.recordset[0].SettingType;
-    
-    if (type === 'number') value = parseFloat(value);
-    if (type === 'boolean') value = value === 'true';
-    if (type === 'json') {
-      try { value = JSON.parse(value); } catch (e) {}
-    }
-    
-    res.json({ value });
+    res.json(result.recordset[0]);
   } catch (error) {
     next(error);
   }
 });
 
 // Update setting
-router.put('/:key', authenticate, authorize('settings.update'), async (req, res, next) => {
+router.put('/:key', authorize('settings'), async (req, res, next) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
     
-    const setting = await db.query(
-      `SELECT SettingID, IsEditable, SettingType FROM SystemSettings WHERE SettingKey = @key`,
-      { key }
+    const result = await db.query(
+      `UPDATE settings SET setting_value = @value, updated_by = @userId, updated_at = CURRENT_TIMESTAMP
+       WHERE setting_key = @key
+       RETURNING *`,
+      { key, value: String(value), userId: req.user.user_id }
     );
     
-    if (setting.recordset.length === 0) {
-      // Create new setting
+    if (result.recordset.length === 0) {
+      // Insert if not exists
       await db.query(
-        `INSERT INTO SystemSettings (SettingKey, SettingValue, UpdatedBy)
-         VALUES (@key, @value, @userId)`,
-        { key, value: String(value), userId: req.user.UserID }
-      );
-    } else {
-      if (!setting.recordset[0].IsEditable) {
-        return res.status(403).json({ error: 'This setting is not editable' });
-      }
-      
-      const stringValue = setting.recordset[0].SettingType === 'json' 
-        ? JSON.stringify(value) 
-        : String(value);
-      
-      await db.query(
-        `UPDATE SystemSettings SET SettingValue = @value, UpdatedBy = @userId, UpdatedAt = GETDATE()
-         WHERE SettingKey = @key`,
-        { key, value: stringValue, userId: req.user.UserID }
+        `INSERT INTO settings (setting_key, setting_value, updated_by) VALUES (@key, @value, @userId)`,
+        { key, value: String(value), userId: req.user.user_id }
       );
     }
     
-    res.json({ success: true, message: 'Setting updated successfully' });
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }
 });
 
-// Get locations
-router.get('/locations/all', authenticate, async (req, res, next) => {
+// Get all locations
+router.get('/locations/all', async (req, res, next) => {
   try {
     const result = await db.query(
-      `SELECT * FROM Locations WHERE IsActive = 1 ORDER BY LocationName`
+      `SELECT * FROM locations ORDER BY location_name`
     );
-    
-    res.json({ locations: result.recordset });
+    res.json(result.recordset);
   } catch (error) {
     next(error);
   }
 });
 
 // Create location
-router.post('/locations', authenticate, authorize('settings.locations'), async (req, res, next) => {
+router.post('/locations', authorize('settings'), [
+  body('locationCode').notEmpty(),
+  body('locationName').notEmpty(),
+], async (req, res, next) => {
   try {
-    const { code, name, address, city, phone, email, isHeadquarters } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ValidationError('Validation failed', errors.array());
+    }
+    
+    const { locationCode, locationName, address, city, phone, email } = req.body;
     
     const result = await db.query(
-      `INSERT INTO Locations (LocationCode, LocationName, Address, City, Phone, Email, IsHeadquarters)
-       OUTPUT INSERTED.LocationID
-       VALUES (@code, @name, @address, @city, @phone, @email, @isHeadquarters)`,
-      {
-        code, name, 
-        address: address || null, 
-        city: city || null,
-        phone: phone || null, 
-        email: email || null,
-        isHeadquarters: isHeadquarters || false
-      }
+      `INSERT INTO locations (location_code, location_name, address, city, phone, email)
+       VALUES (@locationCode, @locationName, @address, @city, @phone, @email)
+       RETURNING *`,
+      { locationCode, locationName, address: address || null, city: city || null, phone: phone || null, email: email || null }
     );
     
-    res.status(201).json({
-      success: true,
-      locationId: result.recordset[0].LocationID,
-    });
+    res.status(201).json(result.recordset[0]);
   } catch (error) {
     next(error);
   }
 });
 
-// Get users
-router.get('/users/all', authenticate, authorize('settings.users'), async (req, res, next) => {
+// Get all users
+router.get('/users/all', authorize('settings'), async (req, res, next) => {
   try {
     const result = await db.query(
-      `SELECT u.UserID, u.EmployeeCode, u.Email, u.FirstName, u.LastName, u.Phone,
-        u.IsActive, u.LastLoginAt, u.CreatedAt,
-        r.RoleID, r.RoleName,
-        l.LocationID, l.LocationName
-       FROM Users u
-       LEFT JOIN Roles r ON u.RoleID = r.RoleID
-       LEFT JOIN Locations l ON u.PrimaryLocationID = l.LocationID
-       ORDER BY u.FirstName, u.LastName`
+      `SELECT u.user_id, u.employee_code, u.email, u.first_name, u.last_name, u.phone, 
+              u.is_active, u.last_login, u.created_at,
+              r.role_name, l.location_name
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.role_id
+       LEFT JOIN locations l ON u.default_location_id = l.location_id
+       ORDER BY u.first_name`
     );
-    
-    res.json({ users: result.recordset });
+    res.json(result.recordset);
   } catch (error) {
     next(error);
   }
 });
 
 // Create user
-router.post('/users', authenticate, authorize('settings.users'), async (req, res, next) => {
+router.post('/users', authorize('settings'), [
+  body('employeeCode').notEmpty(),
+  body('firstName').notEmpty(),
+  body('password').isLength({ min: 6 }),
+], async (req, res, next) => {
   try {
-    const bcrypt = require('bcryptjs');
-    const {
-      employeeCode, email, password, firstName, lastName,
-      phone, roleId, locationId, managerPIN, hourlyRate, commissionRate
-    } = req.body;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ValidationError('Validation failed', errors.array());
+    }
+    
+    const { employeeCode, email, password, firstName, lastName, phone, roleId, locationId } = req.body;
+    
+    // Check if employee code already exists
+    const existing = await db.query(
+      `SELECT user_id FROM users WHERE employee_code = @employeeCode`,
+      { employeeCode }
+    );
+    
+    if (existing.recordset.length > 0) {
+      throw new ValidationError('Employee code already exists');
+    }
     
     const hashedPassword = await bcrypt.hash(password, 12);
     
     const result = await db.query(
-      `INSERT INTO Users (
-        EmployeeCode, Email, PasswordHash, FirstName, LastName,
-        Phone, RoleID, PrimaryLocationID, ManagerPIN, HourlyRate, CommissionRate
-       )
-       OUTPUT INSERTED.UserID
-       VALUES (
-        @employeeCode, @email, @password, @firstName, @lastName,
-        @phone, @roleId, @locationId, @managerPIN, @hourlyRate, @commissionRate
-       )`,
-      {
-        employeeCode,
-        email: email || null,
-        password: hashedPassword,
-        firstName,
-        lastName: lastName || null,
-        phone: phone || null,
-        roleId,
-        locationId: locationId || null,
-        managerPIN: managerPIN || null,
-        hourlyRate: hourlyRate || 0,
-        commissionRate: commissionRate || 0,
+      `INSERT INTO users (employee_code, email, password_hash, first_name, last_name, phone, role_id, default_location_id)
+       VALUES (@employeeCode, @email, @password, @firstName, @lastName, @phone, @roleId, @locationId)
+       RETURNING user_id, employee_code, email, first_name, last_name`,
+      { 
+        employeeCode, 
+        email: email || null, 
+        password: hashedPassword, 
+        firstName, 
+        lastName: lastName || null, 
+        phone: phone || null, 
+        roleId: roleId || 3, // Default to cashier
+        locationId: locationId || 1 
       }
     );
     
-    res.status(201).json({
-      success: true,
-      userId: result.recordset[0].UserID,
-    });
+    res.status(201).json(result.recordset[0]);
   } catch (error) {
     next(error);
   }
 });
 
-// Get roles
-router.get('/roles/all', authenticate, async (req, res, next) => {
+// Get all roles
+router.get('/roles/all', async (req, res, next) => {
   try {
     const result = await db.query(
-      `SELECT RoleID, RoleName, Description, Permissions FROM Roles ORDER BY RoleName`
+      `SELECT * FROM roles WHERE is_active = true ORDER BY role_name`
     );
-    
-    res.json({
-      roles: result.recordset.map(r => ({
-        ...r,
-        Permissions: JSON.parse(r.Permissions || '[]'),
-      })),
-    });
+    res.json(result.recordset);
   } catch (error) {
     next(error);
   }

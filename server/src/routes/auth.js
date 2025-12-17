@@ -22,10 +22,10 @@ router.post('/login', [
     const { employeeCode, password, locationId } = req.body;
     
     const result = await db.query(
-      `SELECT u.*, r.RoleName, r.Permissions
-       FROM Users u
-       LEFT JOIN Roles r ON u.RoleID = r.RoleID
-       WHERE u.EmployeeCode = @employeeCode AND u.IsActive = 1`,
+      `SELECT u.*, r.role_name, r.permissions
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.role_id
+       WHERE u.employee_code = @employeeCode AND u.is_active = true`,
       { employeeCode }
     );
     
@@ -36,42 +36,51 @@ router.post('/login', [
     const user = result.recordset[0];
     
     // TEMPORARY: Plain text password comparison (for development only)
-    // TODO: Re-enable bcrypt hashing for production
-    const validPassword = password === user.PasswordHash || await bcrypt.compare(password, user.PasswordHash).catch(() => false);
+    const validPassword = password === user.password_hash || await bcrypt.compare(password, user.password_hash).catch(() => false);
     if (!validPassword) {
       throw new UnauthorizedError('Invalid credentials');
     }
     
     // Update last login
     await db.query(
-      'UPDATE Users SET LastLoginAt = GETDATE() WHERE UserID = @userId',
-      { userId: user.UserID }
+      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = @userId',
+      { userId: user.user_id }
     );
     
     // Generate tokens
     const accessToken = jwt.sign(
-      { userId: user.UserID, role: user.RoleName },
-      process.env.JWT_SECRET,
+      { userId: user.user_id, role: user.role_name },
+      process.env.JWT_SECRET || 'dev-secret-key',
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
     
     const refreshToken = jwt.sign(
-      { userId: user.UserID },
-      process.env.JWT_REFRESH_SECRET,
+      { userId: user.user_id },
+      process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
       { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
     );
+    
+    // Parse permissions safely
+    let permissions = [];
+    try {
+      permissions = typeof user.permissions === 'string' 
+        ? JSON.parse(user.permissions) 
+        : (user.permissions || {});
+    } catch (e) {
+      permissions = {};
+    }
     
     res.json({
       success: true,
       user: {
-        id: user.UserID,
-        employeeCode: user.EmployeeCode,
-        firstName: user.FirstName,
-        lastName: user.LastName,
-        email: user.Email,
-        role: user.RoleName,
-        permissions: JSON.parse(user.Permissions || '[]'),
-        locationId: user.PrimaryLocationID,
+        id: user.user_id,
+        employeeCode: user.employee_code,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        role: user.role_name,
+        permissions,
+        locationId: user.default_location_id,
       },
       accessToken,
       refreshToken,
@@ -90,13 +99,13 @@ router.post('/refresh', async (req, res, next) => {
       throw new UnauthorizedError('Refresh token required');
     }
     
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret');
     
     const result = await db.query(
-      `SELECT u.*, r.RoleName, r.Permissions
-       FROM Users u
-       LEFT JOIN Roles r ON u.RoleID = r.RoleID
-       WHERE u.UserID = @userId AND u.IsActive = 1`,
+      `SELECT u.*, r.role_name, r.permissions
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.role_id
+       WHERE u.user_id = @userId AND u.is_active = true`,
       { userId: decoded.userId }
     );
     
@@ -107,8 +116,8 @@ router.post('/refresh', async (req, res, next) => {
     const user = result.recordset[0];
     
     const accessToken = jwt.sign(
-      { userId: user.UserID, role: user.RoleName },
-      process.env.JWT_SECRET,
+      { userId: user.user_id, role: user.role_name },
+      process.env.JWT_SECRET || 'dev-secret-key',
       { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
     
@@ -121,15 +130,15 @@ router.post('/refresh', async (req, res, next) => {
 // Get Current User
 router.get('/me', authenticate, async (req, res) => {
   res.json({
-    id: req.user.UserID,
-    employeeCode: req.user.EmployeeCode,
-    firstName: req.user.FirstName,
-    lastName: req.user.LastName,
-    email: req.user.Email,
-    role: req.user.RoleName,
-    permissions: req.user.Permissions,
-    locationId: req.user.PrimaryLocationID,
-    locationName: req.user.LocationName,
+    id: req.user.user_id,
+    employeeCode: req.user.employee_code,
+    firstName: req.user.first_name,
+    lastName: req.user.last_name,
+    email: req.user.email,
+    role: req.user.role_name,
+    permissions: req.user.permissions,
+    locationId: req.user.default_location_id,
+    locationName: req.user.location_name,
   });
 });
 
@@ -147,11 +156,11 @@ router.post('/change-password', authenticate, [
     const { currentPassword, newPassword } = req.body;
     
     const result = await db.query(
-      'SELECT PasswordHash FROM Users WHERE UserID = @userId',
-      { userId: req.user.UserID }
+      'SELECT password_hash FROM users WHERE user_id = @userId',
+      { userId: req.user.user_id }
     );
     
-    const validPassword = await bcrypt.compare(currentPassword, result.recordset[0].PasswordHash);
+    const validPassword = await bcrypt.compare(currentPassword, result.recordset[0].password_hash);
     if (!validPassword) {
       throw new UnauthorizedError('Current password is incorrect');
     }
@@ -159,8 +168,8 @@ router.post('/change-password', authenticate, [
     const hashedPassword = await bcrypt.hash(newPassword, 12);
     
     await db.query(
-      'UPDATE Users SET PasswordHash = @password, UpdatedAt = GETDATE() WHERE UserID = @userId',
-      { password: hashedPassword, userId: req.user.UserID }
+      'UPDATE users SET password_hash = @password, updated_at = CURRENT_TIMESTAMP WHERE user_id = @userId',
+      { password: hashedPassword, userId: req.user.user_id }
     );
     
     res.json({ success: true, message: 'Password changed successfully' });
@@ -177,12 +186,12 @@ router.post('/verify-pin', authenticate, [
     const { pin } = req.body;
     
     const result = await db.query(
-      `SELECT u.UserID, u.FirstName, u.LastName, r.RoleName
-       FROM Users u
-       INNER JOIN Roles r ON u.RoleID = r.RoleID
-       WHERE u.ManagerPIN = @pin 
-         AND u.IsActive = 1
-         AND r.RoleName IN ('Admin', 'Manager')`,
+      `SELECT u.user_id, u.first_name, u.last_name, r.role_name
+       FROM users u
+       INNER JOIN roles r ON u.role_id = r.role_id
+       WHERE u.pin_hash = @pin 
+         AND u.is_active = true
+         AND r.role_name IN ('admin', 'manager')`,
       { pin }
     );
     
@@ -193,9 +202,9 @@ router.post('/verify-pin', authenticate, [
     res.json({ 
       valid: true,
       manager: {
-        id: result.recordset[0].UserID,
-        name: `${result.recordset[0].FirstName} ${result.recordset[0].LastName}`,
-        role: result.recordset[0].RoleName,
+        id: result.recordset[0].user_id,
+        name: `${result.recordset[0].first_name} ${result.recordset[0].last_name}`,
+        role: result.recordset[0].role_name,
       }
     });
   } catch (error) {
