@@ -7,43 +7,82 @@ const { ValidationError, NotFoundError } = require('../middleware/errorHandler')
 const router = express.Router();
 router.use(authenticate);
 
-// Get inventory for a location
+// Get inventory for a location with summary
 router.get('/', async (req, res, next) => {
   try {
     const { locationId, search, lowStock, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
     
-    let whereClause = 'WHERE pv.is_active = true';
-    const params = { limit: parseInt(limit), offset };
+    let whereClause = 'WHERE pv.is_active = true AND p.is_active = true';
+    const params = [];
+    let paramIndex = 1;
     
     if (locationId) {
-      whereClause += ' AND i.location_id = @locationId';
-      params.locationId = parseInt(locationId);
+      whereClause += ` AND i.location_id = $${paramIndex++}`;
+      params.push(parseInt(locationId));
     }
     
     if (search) {
-      whereClause += ' AND (pv.sku ILIKE @search OR p.product_name ILIKE @search)';
-      params.search = `%${search}%`;
+      whereClause += ` AND (pv.sku ILIKE $${paramIndex} OR p.product_name ILIKE $${paramIndex})`;
+      params.push(`%${search}%`);
+      paramIndex++;
     }
     
     if (lowStock === 'true') {
       whereClause += ' AND i.quantity_on_hand <= i.reorder_level';
     }
     
+    // Get inventory items
     const result = await db.query(
-      `SELECT i.*, pv.sku, pv.barcode, pv.variant_name, pv.price,
-              p.product_name, l.location_name
+      `SELECT i.inventory_id, i.variant_id, i.location_id, i.quantity_on_hand, i.quantity_reserved, 
+              i.reorder_level, i.reorder_quantity, i.bin_location, i.updated_at,
+              pv.sku, pv.barcode, pv.variant_name, pv.price, pv.cost_price,
+              p.product_id, p.product_name, p.product_code, l.location_name
        FROM inventory i
        INNER JOIN product_variants pv ON i.variant_id = pv.variant_id
        INNER JOIN products p ON pv.product_id = p.product_id
        INNER JOIN locations l ON i.location_id = l.location_id
        ${whereClause}
        ORDER BY p.product_name, pv.variant_name
-       LIMIT @limit OFFSET @offset`,
-      params
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, parseInt(limit), offset]
     );
     
-    res.json({ inventory: result.recordset });
+    // Transform to frontend format
+    const inventory = result.recordset.map(item => ({
+      id: item.inventory_id,
+      variantId: item.variant_id,
+      locationId: item.location_id,
+      quantity: item.quantity_on_hand,
+      reserved: item.quantity_reserved || 0,
+      reorderLevel: item.reorder_level || 5,
+      reorderQuantity: item.reorder_quantity || 10,
+      binLocation: item.bin_location,
+      updatedAt: item.updated_at,
+      sku: item.sku,
+      barcode: item.barcode,
+      productName: item.product_name,
+      variantName: item.variant_name,
+      productCode: item.product_code,
+      locationName: item.location_name,
+      variant: {
+        id: item.variant_id,
+        sku: item.sku,
+        name: item.variant_name,
+        price: parseFloat(item.price) || 0,
+        costPrice: parseFloat(item.cost_price) || 0
+      }
+    }));
+    
+    // Calculate summary
+    const summary = {
+      totalProducts: inventory.length,
+      totalValue: inventory.reduce((sum, item) => sum + (item.quantity * item.variant.price), 0),
+      lowStock: inventory.filter(item => item.quantity > 0 && item.quantity <= item.reorderLevel).length,
+      outOfStock: inventory.filter(item => item.quantity <= 0).length
+    };
+    
+    res.json({ inventory, summary });
   } catch (error) {
     next(error);
   }
@@ -59,11 +98,11 @@ router.get('/check-other-locations/:variantId', async (req, res, next) => {
       `SELECT i.*, l.location_name, l.phone
        FROM inventory i
        INNER JOIN locations l ON i.location_id = l.location_id
-       WHERE i.variant_id = @variantId 
-         AND i.location_id != @currentLocationId
+       WHERE i.variant_id = $1 
+         AND i.location_id != $2
          AND i.quantity_on_hand > 0
        ORDER BY i.quantity_on_hand DESC`,
-      { variantId: parseInt(variantId), currentLocationId: parseInt(currentLocationId) }
+      [parseInt(variantId), parseInt(currentLocationId)]
     );
     
     res.json({ locations: result.recordset });
@@ -78,7 +117,13 @@ router.get('/locations', async (req, res, next) => {
     const result = await db.query(
       `SELECT * FROM locations WHERE is_active = true ORDER BY location_name`
     );
-    res.json(result.recordset);
+    // Transform to expected format
+    const locations = result.recordset.map(loc => ({
+      LocationID: loc.location_id,
+      LocationName: loc.location_name,
+      ...loc
+    }));
+    res.json({ locations });
   } catch (error) {
     next(error);
   }
@@ -91,16 +136,17 @@ router.get('/transactions', async (req, res, next) => {
     const offset = (page - 1) * limit;
     
     let whereClause = 'WHERE 1=1';
-    const params = { limit: parseInt(limit), offset };
+    const params = [];
+    let paramIndex = 1;
     
     if (variantId) {
-      whereClause += ' AND it.variant_id = @variantId';
-      params.variantId = parseInt(variantId);
+      whereClause += ` AND it.variant_id = $${paramIndex++}`;
+      params.push(parseInt(variantId));
     }
     
     if (locationId) {
-      whereClause += ' AND it.location_id = @locationId';
-      params.locationId = parseInt(locationId);
+      whereClause += ` AND it.location_id = $${paramIndex++}`;
+      params.push(parseInt(locationId));
     }
     
     const result = await db.query(
@@ -111,8 +157,8 @@ router.get('/transactions', async (req, res, next) => {
        LEFT JOIN users u ON it.user_id = u.user_id
        ${whereClause}
        ORDER BY it.created_at DESC
-       LIMIT @limit OFFSET @offset`,
-      params
+       LIMIT $${paramIndex++} OFFSET $${paramIndex}`,
+      [...params, parseInt(limit), offset]
     );
     
     res.json({ transactions: result.recordset });
@@ -138,8 +184,8 @@ router.post('/adjust', authorize('inventory'), [
     
     // Get current stock
     let currentResult = await db.query(
-      `SELECT quantity_on_hand FROM inventory WHERE variant_id = @variantId AND location_id = @locationId`,
-      { variantId, locationId }
+      `SELECT quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+      [variantId, locationId]
     );
     
     let currentStock = 0;
@@ -147,8 +193,8 @@ router.post('/adjust', authorize('inventory'), [
     if (currentResult.recordset.length === 0) {
       // Create inventory record if it doesn't exist
       await db.query(
-        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES (@variantId, @locationId, 0)`,
-        { variantId, locationId }
+        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES ($1, $2, 0)`,
+        [variantId, locationId]
       );
     } else {
       currentStock = currentResult.recordset[0].quantity_on_hand;
@@ -158,29 +204,23 @@ router.post('/adjust', authorize('inventory'), [
     
     // Update inventory
     await db.query(
-      `UPDATE inventory SET quantity_on_hand = @newStock, updated_at = CURRENT_TIMESTAMP
-       WHERE variant_id = @variantId AND location_id = @locationId`,
-      { newStock, variantId, locationId }
+      `UPDATE inventory SET quantity_on_hand = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE variant_id = $2 AND location_id = $3`,
+      [newStock, variantId, locationId]
     );
     
     // Log transaction
     await db.query(
       `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, notes, user_id)
-       VALUES (@variantId, @locationId, 'ADJUSTMENT', @adjustment, @before, @after, @reason, @userId)`,
-      { 
-        variantId, 
-        locationId, 
-        adjustment, 
-        before: currentStock, 
-        after: newStock, 
-        reason, 
-        userId: req.user.user_id 
-      }
+       VALUES ($1, $2, 'ADJUSTMENT', $3, $4, $5, $6, $7)`,
+      [variantId, locationId, adjustment, currentStock, newStock, reason, req.user.user_id]
     );
     
     // Emit socket event
     const io = req.app.get('io');
-    io.to(`location-${locationId}`).emit('inventory-updated', { variantId, locationId, newStock });
+    if (io) {
+      io.to(`location-${locationId}`).emit('inventory-updated', { variantId, locationId, newStock });
+    }
     
     res.json({ success: true, previousStock: currentStock, newStock });
   } catch (error) {
@@ -204,23 +244,23 @@ router.post('/receive', authorize('inventory'), [
     
     // Upsert inventory
     let currentResult = await db.query(
-      `SELECT quantity_on_hand FROM inventory WHERE variant_id = @variantId AND location_id = @locationId`,
-      { variantId, locationId }
+      `SELECT quantity_on_hand FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+      [variantId, locationId]
     );
     
     let currentStock = 0;
     
     if (currentResult.recordset.length === 0) {
       await db.query(
-        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES (@variantId, @locationId, @quantity)`,
-        { variantId, locationId, quantity }
+        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES ($1, $2, $3)`,
+        [variantId, locationId, quantity]
       );
     } else {
       currentStock = currentResult.recordset[0].quantity_on_hand;
       await db.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand + @quantity, updated_at = CURRENT_TIMESTAMP
-         WHERE variant_id = @variantId AND location_id = @locationId`,
-        { quantity, variantId, locationId }
+        `UPDATE inventory SET quantity_on_hand = quantity_on_hand + $1, updated_at = CURRENT_TIMESTAMP
+         WHERE variant_id = $2 AND location_id = $3`,
+        [quantity, variantId, locationId]
       );
     }
     
@@ -229,16 +269,8 @@ router.post('/receive', authorize('inventory'), [
     // Log transaction
     await db.query(
       `INSERT INTO inventory_transactions (variant_id, location_id, transaction_type, quantity_change, quantity_before, quantity_after, notes, user_id)
-       VALUES (@variantId, @locationId, 'RECEIVE', @quantity, @before, @after, @notes, @userId)`,
-      { 
-        variantId, 
-        locationId, 
-        quantity, 
-        before: currentStock, 
-        after: newStock, 
-        notes: notes || 'Stock received', 
-        userId: req.user.user_id 
-      }
+       VALUES ($1, $2, 'RECEIVE', $3, $4, $5, $6, $7)`,
+      [variantId, locationId, quantity, currentStock, newStock, notes || 'Stock received', req.user.user_id]
     );
     
     res.json({ success: true, previousStock: currentStock, newStock });
@@ -257,27 +289,27 @@ router.post('/transfers', authorize('inventory'), async (req, res, next) => {
       
       // Decrease from source
       await db.query(
-        `UPDATE inventory SET quantity_on_hand = quantity_on_hand - @quantity
-         WHERE variant_id = @variantId AND location_id = @fromLocationId`,
-        { quantity, variantId, fromLocationId }
+        `UPDATE inventory SET quantity_on_hand = quantity_on_hand - $1
+         WHERE variant_id = $2 AND location_id = $3`,
+        [quantity, variantId, fromLocationId]
       );
       
       // Increase at destination (upsert)
       const existing = await db.query(
-        `SELECT inventory_id FROM inventory WHERE variant_id = @variantId AND location_id = @toLocationId`,
-        { variantId, toLocationId }
+        `SELECT inventory_id FROM inventory WHERE variant_id = $1 AND location_id = $2`,
+        [variantId, toLocationId]
       );
       
       if (existing.recordset.length === 0) {
         await db.query(
-          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES (@variantId, @toLocationId, @quantity)`,
-          { variantId, toLocationId, quantity }
+          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand) VALUES ($1, $2, $3)`,
+          [variantId, toLocationId, quantity]
         );
       } else {
         await db.query(
-          `UPDATE inventory SET quantity_on_hand = quantity_on_hand + @quantity
-           WHERE variant_id = @variantId AND location_id = @toLocationId`,
-          { quantity, variantId, toLocationId }
+          `UPDATE inventory SET quantity_on_hand = quantity_on_hand + $1
+           WHERE variant_id = $2 AND location_id = $3`,
+          [quantity, variantId, toLocationId]
         );
       }
     }

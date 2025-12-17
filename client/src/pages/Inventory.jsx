@@ -48,16 +48,21 @@ export default function Inventory() {
     }
   });
   
-  // Extract inventory array from response
+  // Extract inventory array and summary from response
   const inventory = inventoryData?.inventory || [];
-
-  // Compute summary from inventory data
-  const summary = {
+  const summary = inventoryData?.summary || {
     totalProducts: inventory.length,
-    totalValue: inventory.reduce((sum, item) => sum + (item.quantity * (item.variant?.price || 0)), 0),
-    lowStock: inventory.filter(item => item.quantity > 0 && item.quantity <= item.reorderLevel).length,
-    outOfStock: inventory.filter(item => item.quantity <= 0).length
+    totalValue: inventory.reduce((sum, item) => sum + ((item.quantity || 0) * (item.variant?.price || 0)), 0),
+    lowStock: inventory.filter(item => item.quantity > 0 && item.quantity <= (item.reorderLevel || 5)).length,
+    outOfStock: inventory.filter(item => (item.quantity || 0) <= 0).length
   };
+
+  // Filter inventory based on stockFilter
+  const filteredInventory = stockFilter === 'out' 
+    ? inventory.filter(item => (item.quantity || 0) <= 0)
+    : stockFilter === 'low'
+    ? inventory.filter(item => item.quantity > 0 && item.quantity <= (item.reorderLevel || 5))
+    : inventory;
 
   const handleAdjust = (product) => {
     setSelectedProduct(product);
@@ -213,34 +218,34 @@ export default function Inventory() {
                   <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-20 ml-auto" /></td>
                 </tr>
               ))
-            ) : inventory?.length > 0 ? (
-              inventory.map((item) => (
-                <tr key={`${item.product?.id}-${item.location?.id}-${item.variant?.id}`} className="hover:bg-gray-50">
+            ) : filteredInventory?.length > 0 ? (
+              filteredInventory.map((item) => (
+                <tr key={`${item.id || item.variantId}-${item.locationId}`} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div>
-                      <p className="font-medium text-gray-900">{item.product?.name}</p>
-                      {item.variant?.name && (
-                        <p className="text-sm text-gray-500">{item.variant.name}</p>
+                      <p className="font-medium text-gray-900">{item.productName || item.product?.name}</p>
+                      {(item.variantName || item.variant?.name) && (
+                        <p className="text-sm text-gray-500">{item.variantName || item.variant?.name}</p>
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{item.variant?.sku}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{item.sku || item.variant?.sku}</td>
                   <td className="px-6 py-4">
                     <span className="px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded-full">
-                      {item.location?.name}
+                      {item.locationName || item.location?.name}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-center font-medium">{item.quantity}</td>
+                  <td className="px-6 py-4 text-center font-medium">{item.quantity || 0}</td>
                   <td className="px-6 py-4 text-center text-gray-500">{item.reserved || 0}</td>
                   <td className="px-6 py-4 text-center font-medium">
-                    {item.available || (item.quantity - (item.reserved || 0))}
+                    {(item.quantity || 0) - (item.reserved || 0)}
                   </td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      getStockStatusColor(item.quantity, item.reorderLevel || 10)
+                      getStockStatusColor(item.quantity || 0, item.reorderLevel || 5)
                     }`}>
-                      {item.quantity <= 0 ? 'Out of Stock' :
-                       item.quantity <= (item.reorderLevel || 10) ? 'Low Stock' : 'In Stock'}
+                      {(item.quantity || 0) <= 0 ? 'Out of Stock' :
+                       (item.quantity || 0) <= (item.reorderLevel || 5) ? 'Low Stock' : 'In Stock'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
