@@ -128,27 +128,29 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
-  try {
-    // Run database migrations
-    logger.info('Running database migrations...');
+  // Start the HTTP server first so health checks pass
+  httpServer.listen(PORT, async () => {
+    logger.info(`🚀 HIT BY HUMA POS Server running on port ${PORT}`);
+    logger.info(`📡 API available at http://localhost:${PORT}${API_PREFIX}`);
+    
+    // Now try to connect to database (after server is listening)
     try {
-      await migrate();
-    } catch (migrationError) {
-      logger.warn('Migration encountered issues, continuing startup...', migrationError.message);
+      // Run database migrations
+      logger.info('Running database migrations...');
+      try {
+        await migrate();
+      } catch (migrationError) {
+        logger.warn('Migration encountered issues:', migrationError.message);
+      }
+      
+      // Connect to database
+      await db.connect();
+      logger.info('Database connected successfully');
+    } catch (error) {
+      logger.error('Database connection failed:', error.message);
+      logger.info('Server running but database not available');
     }
-    
-    // Connect to database
-    await db.connect();
-    logger.info('Database connected successfully');
-    
-    httpServer.listen(PORT, () => {
-      logger.info(`🚀 HIT BY HUMA POS Server running on port ${PORT}`);
-      logger.info(`📡 API available at http://localhost:${PORT}${API_PREFIX}`);
-    });
-  } catch (error) {
-    logger.error('Failed to start server:', error);
-    process.exit(1);
-  }
+  });
 };
 
 // Graceful Shutdown
