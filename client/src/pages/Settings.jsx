@@ -12,7 +12,11 @@ import {
   XMarkIcon,
   CheckIcon,
   ExclamationTriangleIcon,
-  WifiIcon
+  WifiIcon,
+  TagIcon,
+  PencilIcon,
+  TrashIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -22,6 +26,7 @@ export default function Settings() {
 
   const tabs = [
     { id: 'store', label: 'Store Info', icon: BuildingStorefrontIcon },
+    { id: 'categories', label: 'Categories', icon: TagIcon },
     { id: 'hardware', label: 'Hardware', icon: PrinterIcon },
     { id: 'tax', label: 'Tax & Payment', icon: CurrencyDollarIcon },
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
@@ -61,11 +66,232 @@ export default function Settings() {
         {/* Content */}
         <div className="flex-1">
           {activeTab === 'store' && <StoreSettings />}
+          {activeTab === 'categories' && <CategorySettings />}
           {activeTab === 'hardware' && <HardwareSettings />}
           {activeTab === 'tax' && <TaxSettings />}
           {activeTab === 'notifications' && <NotificationSettings />}
           {activeTab === 'users' && <UserSettings />}
           {activeTab === 'security' && <SecuritySettings />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Category Settings Component
+function CategorySettings() {
+  const queryClient = useQueryClient();
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formData, setFormData] = useState({
+    category_name: '',
+    description: '',
+    sort_order: 0
+  });
+
+  const { data: categories = [], isLoading } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => api.get('/products/categories').then(res => res.data)
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => api.post('/products/categories', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['categories']);
+      toast.success('Category created successfully');
+      setShowAddForm(false);
+      setFormData({ category_name: '', description: '', sort_order: 0 });
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to create category')
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/products/categories/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['categories']);
+      toast.success('Category updated successfully');
+      setEditingCategory(null);
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to update category')
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.delete(`/products/categories/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['categories']);
+      toast.success('Category deleted successfully');
+    },
+    onError: (error) => toast.error(error.response?.data?.message || 'Failed to delete category')
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (editingCategory) {
+      updateMutation.mutate({ id: editingCategory.category_id, data: formData });
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const startEdit = (category) => {
+    setEditingCategory(category);
+    setFormData({
+      category_name: category.category_name,
+      description: category.description || '',
+      sort_order: category.sort_order || 0,
+      is_active: category.is_active
+    });
+    setShowAddForm(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingCategory(null);
+    setShowAddForm(false);
+    setFormData({ category_name: '', description: '', sort_order: 0 });
+  };
+
+  if (isLoading) {
+    return <div className="animate-pulse bg-gray-100 rounded-xl h-64" />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl p-6 border">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-lg font-semibold">Product Categories</h2>
+            <p className="text-sm text-gray-500">Manage your product categories</p>
+          </div>
+          {!showAddForm && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              <PlusIcon className="w-5 h-5" />
+              Add Category
+            </button>
+          )}
+        </div>
+
+        {/* Add/Edit Form */}
+        {showAddForm && (
+          <form onSubmit={handleSubmit} className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-4">
+              {editingCategory ? 'Edit Category' : 'Add New Category'}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Category Name *</label>
+                <input
+                  type="text"
+                  value={formData.category_name}
+                  onChange={(e) => setFormData({ ...formData, category_name: e.target.value })}
+                  className="input"
+                  placeholder="Enter category name"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Sort Order</label>
+                <input
+                  type="number"
+                  value={formData.sort_order}
+                  onChange={(e) => setFormData({ ...formData, sort_order: parseInt(e.target.value) || 0 })}
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="label">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="input resize-none"
+                  rows={2}
+                  placeholder="Optional description"
+                />
+              </div>
+              {editingCategory && (
+                <div className="md:col-span-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_active}
+                      onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                      className="w-4 h-4 text-primary-600 rounded"
+                    />
+                    <span className="text-sm text-gray-700">Active</span>
+                  </label>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                type="submit"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="btn btn-primary"
+              >
+                {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : 
+                  editingCategory ? 'Update Category' : 'Create Category'}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="btn bg-gray-100 text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Categories List */}
+        <div className="space-y-2">
+          {categories.length === 0 ? (
+            <p className="text-center text-gray-500 py-8">No categories found. Add your first category above.</p>
+          ) : (
+            categories.map((category) => (
+              <div
+                key={category.category_id}
+                className={`flex items-center justify-between p-4 rounded-lg border ${
+                  category.is_active ? 'bg-white' : 'bg-gray-50 opacity-60'
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-gray-900">{category.category_name}</h3>
+                    {!category.is_active && (
+                      <span className="px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">Inactive</span>
+                    )}
+                  </div>
+                  {category.description && (
+                    <p className="text-sm text-gray-500 mt-1">{category.description}</p>
+                  )}
+                  <p className="text-xs text-gray-400 mt-1">Sort Order: {category.sort_order || 0}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => startEdit(category)}
+                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                    title="Edit"
+                  >
+                    <PencilIcon className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm('Are you sure you want to delete this category?')) {
+                        deleteMutation.mutate(category.category_id);
+                      }
+                    }}
+                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Delete"
+                  >
+                    <TrashIcon className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

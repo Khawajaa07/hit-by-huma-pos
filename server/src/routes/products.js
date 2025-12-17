@@ -136,6 +136,98 @@ router.get('/categories/list', async (req, res, next) => {
   }
 });
 
+// Get all categories (including inactive) for management
+router.get('/categories', async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `SELECT * FROM categories ORDER BY sort_order, category_name`
+    );
+    res.json(result.recordset);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create category
+router.post('/categories', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { category_name, description, sort_order = 0 } = req.body;
+    
+    if (!category_name) {
+      throw new ValidationError('Category name is required');
+    }
+    
+    const result = await db.query(
+      `INSERT INTO categories (category_name, description, sort_order, is_active)
+       VALUES ($1, $2, $3, true)
+       RETURNING *`,
+      [category_name, description || null, sort_order]
+    );
+    
+    res.status(201).json(result.recordset[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update category
+router.put('/categories/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { category_name, description, sort_order, is_active } = req.body;
+    
+    if (!category_name) {
+      throw new ValidationError('Category name is required');
+    }
+    
+    const result = await db.query(
+      `UPDATE categories 
+       SET category_name = $1, description = $2, sort_order = $3, is_active = $4
+       WHERE category_id = $5
+       RETURNING *`,
+      [category_name, description || null, sort_order || 0, is_active !== false, id]
+    );
+    
+    if (result.recordset.length === 0) {
+      throw new NotFoundError('Category not found');
+    }
+    
+    res.json(result.recordset[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete category (soft delete)
+router.delete('/categories/:id', authorize('admin', 'manager'), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if category has products
+    const productsCheck = await db.query(
+      `SELECT COUNT(*) as count FROM products WHERE category_id = $1 AND is_active = true`,
+      [id]
+    );
+    
+    if (parseInt(productsCheck.recordset[0].count) > 0) {
+      throw new ValidationError('Cannot delete category with active products. Please move or delete products first.');
+    }
+    
+    const result = await db.query(
+      `UPDATE categories SET is_active = false WHERE category_id = $1 RETURNING *`,
+      [id]
+    );
+    
+    if (result.recordset.length === 0) {
+      throw new NotFoundError('Category not found');
+    }
+    
+    res.json({ message: 'Category deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get attributes
 router.get('/attributes/list', async (req, res, next) => {
   try {
