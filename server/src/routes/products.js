@@ -263,49 +263,48 @@ router.post('/', authorize('products'), [
     }
     
     // Support both frontend field names (name/code) and backend field names (productName/productCode)
-    const { productCode, productName, name, code, categoryId, description, basePrice, costPrice, taxRate, barcode, initialStock } = req.body;
+    const { productCode, productName, name, code, categoryId, category_id, description, basePrice, costPrice, taxRate, barcode, initialStock, initial_stock } = req.body;
     const finalName = productName || name;
     const finalCode = productCode || code || `PRD-${Date.now()}`;
+    const finalCategoryId = categoryId || category_id || null;
+    const finalInitialStock = initialStock || initial_stock || 0;
     
     if (!finalName) {
       throw new ValidationError('Product name is required');
     }
     
+    // Create the product
     const result = await db.query(
       `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, created_by)
-       VALUES (@productCode, @productName, @categoryId, @description, @basePrice, @costPrice, @taxRate, @createdBy)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      { 
-        productCode: finalCode,
-        productName: finalName,
-        categoryId: categoryId || null,
-        description: description || null,
-        basePrice,
-        costPrice: costPrice || 0,
-        taxRate: taxRate || 0,
-        createdBy: req.user.user_id
-      }
+      [finalCode, finalName, finalCategoryId, description || null, basePrice, costPrice || 0, taxRate || 0, req.user.user_id]
     );
     
     const product = result.recordset[0];
     
-    // If initial stock is provided, create inventory record
-    if (initialStock && initialStock > 0) {
+    // Create a default variant for this product
+    const variantResult = await db.query(
+      `INSERT INTO product_variants (product_id, sku, variant_name, price, cost_price, is_active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING *`,
+      [product.product_id, finalCode, 'Default', basePrice, costPrice || 0]
+    );
+    
+    const variant = variantResult.recordset[0];
+    
+    // If initial stock is provided, create inventory record for the variant
+    if (finalInitialStock && parseInt(finalInitialStock) > 0) {
       await db.query(
-        `INSERT INTO inventory (product_id, location_id, quantity, last_updated_by)
-         VALUES (@productId, @locationId, @quantity, @userId)
-         ON CONFLICT (product_id, location_id) 
-         DO UPDATE SET quantity = inventory.quantity + @quantity, updated_at = CURRENT_TIMESTAMP`,
-        {
-          productId: product.product_id,
-          locationId: req.user.default_location_id || 1,
-          quantity: parseInt(initialStock),
-          userId: req.user.user_id
-        }
+        `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (variant_id, location_id) 
+         DO UPDATE SET quantity_on_hand = inventory.quantity_on_hand + $3, updated_at = CURRENT_TIMESTAMP`,
+        [variant.variant_id, req.user.default_location_id || 1, parseInt(finalInitialStock)]
       );
     }
     
-    res.status(201).json(product);
+    res.status(201).json({ ...product, variant });
   } catch (error) {
     next(error);
   }
