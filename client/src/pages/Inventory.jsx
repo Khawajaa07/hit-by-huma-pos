@@ -340,10 +340,10 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
         : -parseInt(quantity);
       
       await api.post('/inventory/adjust', {
-        variantId: product.variant?.id,
-        locationId: product.location?.id,
+        variantId: product.variantId || product.variant?.id,
+        locationId: product.locationId || product.location?.id || 1,
         adjustment: adjustmentValue,
-        reason
+        reason: reason || 'Stock adjustment'
       });
       toast.success('Stock adjusted successfully');
       onSave();
@@ -354,9 +354,10 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
     }
   };
 
+  const currentQty = product.quantity || 0;
   const newQuantity = adjustmentType === 'add'
-    ? product.quantity + (parseInt(quantity) || 0)
-    : product.quantity - (parseInt(quantity) || 0);
+    ? currentQty + (parseInt(quantity) || 0)
+    : currentQty - (parseInt(quantity) || 0);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -369,12 +370,12 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
         </div>
 
         <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <p className="font-medium text-gray-900">{product.product?.name}</p>
-          {product.variant?.name && (
-            <p className="text-sm text-gray-500">{product.variant.name}</p>
+          <p className="font-medium text-gray-900">{product.productName || product.product?.name}</p>
+          {(product.variantName || product.variant?.name) && (
+            <p className="text-sm text-gray-500">{product.variantName || product.variant?.name}</p>
           )}
           <p className="text-sm text-gray-500 mt-1">
-            Current Stock: <span className="font-medium">{product.quantity}</span> at {product.location?.name}
+            Current Stock: <span className="font-medium">{product.quantity || 0}</span> at {product.locationName || product.location?.name}
           </p>
         </div>
 
@@ -416,7 +417,7 @@ function StockAdjustmentModal({ product, onClose, onSave }) {
               onChange={(e) => setQuantity(e.target.value)}
               placeholder="Enter quantity"
               min="1"
-              max={adjustmentType === 'remove' ? product.quantity : undefined}
+              max={adjustmentType === 'remove' ? (product.quantity || 0) : undefined}
               className="input"
               required
             />
@@ -486,7 +487,8 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const availableLocations = locations?.filter(l => l.id !== product.location?.id) || [];
+  const currentLocationId = product.locationId || product.location?.id;
+  const availableLocations = locations?.filter(l => (l.id || l.LocationID) !== currentLocationId) || [];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -494,7 +496,7 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
       toast.error('Please enter a valid quantity');
       return;
     }
-    if (parseInt(quantity) > product.quantity) {
+    if (parseInt(quantity) > (product.quantity || 0)) {
       toast.error('Cannot transfer more than available stock');
       return;
     }
@@ -502,10 +504,10 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
     setLoading(true);
     try {
       await api.post('/inventory/transfers', {
-        fromLocationId: product.location?.id,
+        fromLocationId: product.locationId || product.location?.id || 1,
         toLocationId: parseInt(toLocation),
         items: [{
-          variantId: product.variant?.id,
+          variantId: product.variantId || product.variant?.id,
           quantity: parseInt(quantity)
         }],
         notes
@@ -530,17 +532,17 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
         </div>
 
         <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-          <p className="font-medium text-gray-900">{product.product?.name}</p>
-          {product.variant?.name && (
-            <p className="text-sm text-gray-500">{product.variant.name}</p>
+          <p className="font-medium text-gray-900">{product.productName || product.product?.name}</p>
+          {(product.variantName || product.variant?.name) && (
+            <p className="text-sm text-gray-500">{product.variantName || product.variant?.name}</p>
           )}
           <div className="flex items-center gap-2 mt-2">
             <span className="px-2 py-1 bg-primary-100 text-primary-700 text-sm rounded-full">
-              From: {product.location?.name}
+              From: {product.locationName || product.location?.name}
             </span>
             <span className="text-gray-500">→</span>
             <span className="text-sm text-gray-600">
-              Available: {product.quantity}
+              Available: {product.quantity || 0}
             </span>
           </div>
         </div>
@@ -557,8 +559,8 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
             >
               <option value="">Select destination</option>
               {availableLocations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
+                <option key={loc.id || loc.LocationID} value={loc.id || loc.LocationID}>
+                  {loc.name || loc.LocationName}
                 </option>
               ))}
             </select>
@@ -573,7 +575,7 @@ function StockTransferModal({ product, locations, onClose, onSave }) {
               onChange={(e) => setQuantity(e.target.value)}
               placeholder="Enter quantity"
               min="1"
-              max={product.quantity}
+              max={product.quantity || 0}
               className="input"
               required
             />
