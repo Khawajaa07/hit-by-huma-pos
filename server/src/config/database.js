@@ -3,10 +3,15 @@ const logger = require('../utils/logger');
 
 // PostgreSQL configuration
 // Railway provides DATABASE_URL automatically
+// For Railway internal networking, no SSL needed
+// For public connections (proxy), SSL is required
+const isInternalNetwork = process.env.DATABASE_URL?.includes('.railway.internal');
+const isLocalhost = process.env.DATABASE_URL?.includes('localhost') || !process.env.DATABASE_URL;
+
 const config = process.env.DATABASE_URL 
   ? {
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: (isInternalNetwork || isLocalhost) ? false : { rejectUnauthorized: false },
     }
   : {
       host: process.env.DB_HOST || 'localhost',
@@ -20,11 +25,16 @@ let pool = null;
 
 const connect = async () => {
   try {
+    logger.info('Connecting to database...', { 
+      ssl: config.ssl ? 'enabled' : 'disabled',
+      isInternalNetwork 
+    });
+    
     pool = new Pool({
       ...config,
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 30000,
+      connectionTimeoutMillis: 60000,
     });
     
     // Test connection

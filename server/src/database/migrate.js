@@ -6,10 +6,15 @@ async function migrate() {
   console.log('🚀 Starting database migration...');
   console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'set (hidden)' : 'not set');
   
+  // For Railway internal networking, no SSL needed
+  // For public connections (proxy), SSL is required
+  const isInternalNetwork = process.env.DATABASE_URL?.includes('.railway.internal');
+  const isLocalhost = process.env.DATABASE_URL?.includes('localhost');
+  
   const config = process.env.DATABASE_URL 
     ? {
         connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+        ssl: (isInternalNetwork || isLocalhost) ? false : { rejectUnauthorized: false },
       }
     : {
         host: process.env.DB_HOST || 'localhost',
@@ -19,9 +24,12 @@ async function migrate() {
         password: process.env.DB_PASSWORD || '',
       };
 
+  console.log('SSL mode:', config.ssl ? 'enabled' : 'disabled');
+  console.log('Internal network:', isInternalNetwork);
+  
   const pool = new Pool({
     ...config,
-    connectionTimeoutMillis: 30000,
+    connectionTimeoutMillis: 60000,
     idleTimeoutMillis: 30000,
   });
 
