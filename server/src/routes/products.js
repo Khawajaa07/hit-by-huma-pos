@@ -160,7 +160,8 @@ router.get('/attributes/list', async (req, res, next) => {
 
 // Create product
 router.post('/', authorize('products'), [
-  body('productName').notEmpty(),
+  body('name').optional().notEmpty(),
+  body('productName').optional().notEmpty(),
   body('basePrice').isNumeric(),
 ], async (req, res, next) => {
   try {
@@ -169,20 +170,28 @@ router.post('/', authorize('products'), [
       throw new ValidationError('Validation failed', errors.array());
     }
     
-    const { productCode, productName, categoryId, description, basePrice, costPrice, taxRate } = req.body;
+    // Support both frontend field names (name/code) and backend field names (productName/productCode)
+    const { productCode, productName, name, code, categoryId, description, basePrice, costPrice, taxRate, barcode } = req.body;
+    const finalName = productName || name;
+    const finalCode = productCode || code || `PRD-${Date.now()}`;
+    
+    if (!finalName) {
+      throw new ValidationError('Product name is required');
+    }
     
     const result = await db.query(
-      `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, created_by)
-       VALUES (@productCode, @productName, @categoryId, @description, @basePrice, @costPrice, @taxRate, @createdBy)
+      `INSERT INTO products (product_code, product_name, category_id, description, base_price, cost_price, tax_rate, barcode, created_by)
+       VALUES (@productCode, @productName, @categoryId, @description, @basePrice, @costPrice, @taxRate, @barcode, @createdBy)
        RETURNING *`,
       { 
-        productCode: productCode || `PRD-${Date.now()}`,
-        productName,
+        productCode: finalCode,
+        productName: finalName,
         categoryId: categoryId || null,
         description: description || null,
         basePrice,
         costPrice: costPrice || 0,
         taxRate: taxRate || 0,
+        barcode: barcode || null,
         createdBy: req.user.user_id
       }
     );

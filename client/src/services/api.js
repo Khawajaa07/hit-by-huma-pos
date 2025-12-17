@@ -1,10 +1,13 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-// Use environment variable for production, fallback to relative path for development
+// Backend API URL - Railway deployment
+const BACKEND_URL = 'https://pos-backend-production-93a5.up.railway.app';
 const API_BASE_URL = import.meta.env.VITE_API_URL 
   ? `${import.meta.env.VITE_API_URL}/api/v1`
-  : '/api/v1';
+  : import.meta.env.DEV 
+    ? '/api/v1' 
+    : `${BACKEND_URL}/api/v1`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

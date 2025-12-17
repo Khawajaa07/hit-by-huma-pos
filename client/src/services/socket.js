@@ -1,8 +1,9 @@
 import { io } from 'socket.io-client';
 import { useCartStore } from '../stores/cartStore';
 
-// Use environment variable for production, fallback to relative path for development
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
+// Backend Socket URL - Railway deployment
+const BACKEND_URL = 'https://pos-backend-production-93a5.up.railway.app';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (import.meta.env.DEV ? '/' : BACKEND_URL);
 
 class SocketService {
   constructor() {
