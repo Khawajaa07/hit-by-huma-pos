@@ -1,17 +1,35 @@
 /**
  * Notification Service
  * Handles SMS and Email notifications using job queue
+ * Note: Queue and SMS features require Redis and Twilio credentials
  */
 
-const Queue = require('bull');
-const twilio = require('twilio');
 const db = require('../config/database');
 const logger = require('../utils/logger');
+
+// Try to load optional dependencies
+let Queue, twilio;
+try {
+  Queue = require('bull');
+} catch (e) {
+  logger.warn('Bull queue not available - background jobs disabled');
+}
+
+try {
+  twilio = require('twilio');
+} catch (e) {
+  logger.warn('Twilio not available - SMS notifications disabled');
+}
 
 // Initialize Redis queue for background job processing
 let smsQueue = null;
 
 const initializeQueue = () => {
+  if (!Queue) {
+    logger.info('Queue disabled - Redis not configured');
+    return null;
+  }
+  
   if (smsQueue) return smsQueue;
 
   const redisConfig = {
@@ -20,70 +38,80 @@ const initializeQueue = () => {
     password: process.env.REDIS_PASSWORD || undefined,
   };
 
-  smsQueue = new Queue('sms-notifications', {
-    redis: redisConfig,
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 5000, // 5 seconds initial delay
+  try {
+    smsQueue = new Queue('sms-notifications', {
+      redis: redisConfig,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000, // 5 seconds initial delay
+        },
+        removeOnComplete: 100, // Keep last 100 completed jobs
+        removeOnFail: 50, // Keep last 50 failed jobs
       },
-      removeOnComplete: 100, // Keep last 100 completed jobs
-      removeOnFail: 50, // Keep last 50 failed jobs
-    },
-  });
+    });
 
-  // Process SMS jobs
-  smsQueue.process(async (job) => {
-    const { notificationId, phone, message } = job.data;
-    
-    try {
-      await sendSMS(phone, message);
+    // Process SMS jobs
+    smsQueue.process(async (job) => {
+      const { notificationId, phone, message } = job.data;
       
-      // Update notification status
-      await db.query(
-        `UPDATE NotificationQueue 
-         SET Status = 'SENT', SentAt = GETDATE(), Attempts = Attempts + 1
-         WHERE NotificationID = @id`,
-        { id: notificationId }
-      );
+      try {
+        await sendSMS(phone, message);
+        
+        // Update notification status
+        await db.query(
+          `UPDATE NotificationQueue 
+           SET Status = 'SENT', SentAt = GETDATE(), Attempts = Attempts + 1
+           WHERE NotificationID = @id`,
+          { id: notificationId }
+        );
       
-      logger.info(`SMS sent successfully to ${phone}`);
-      return { success: true, phone };
-    } catch (error) {
-      // Update notification with error
-      await db.query(
-        `UPDATE NotificationQueue 
-         SET Status = 'FAILED', ErrorMessage = @error, Attempts = Attempts + 1, LastAttemptAt = GETDATE()
-         WHERE NotificationID = @id`,
-        { id: notificationId, error: error.message }
-      );
-      
-      throw error;
-    }
-  });
+        logger.info(`SMS sent successfully to ${phone}`);
+        return { success: true, phone };
+      } catch (error) {
+        // Update notification with error
+        await db.query(
+          `UPDATE NotificationQueue 
+           SET Status = 'FAILED', ErrorMessage = @error, Attempts = Attempts + 1, LastAttemptAt = GETDATE()
+           WHERE NotificationID = @id`,
+          { id: notificationId, error: error.message }
+        );
+        
+        throw error;
+      }
+    });
 
-  // Queue event handlers
-  smsQueue.on('completed', (job, result) => {
-    logger.info(`SMS job ${job.id} completed:`, result);
-  });
+    // Queue event handlers
+    smsQueue.on('completed', (job, result) => {
+      logger.info(`SMS job ${job.id} completed:`, result);
+    });
 
-  smsQueue.on('failed', (job, err) => {
-    logger.error(`SMS job ${job.id} failed:`, err.message);
-  });
+    smsQueue.on('failed', (job, err) => {
+      logger.error(`SMS job ${job.id} failed:`, err.message);
+    });
 
-  smsQueue.on('error', (error) => {
-    logger.error('SMS queue error:', error);
-  });
+    smsQueue.on('error', (error) => {
+      logger.error('SMS queue error:', error);
+    });
 
-  logger.info('SMS notification queue initialized');
-  return smsQueue;
+    logger.info('SMS notification queue initialized');
+    return smsQueue;
+  } catch (queueError) {
+    logger.error('Failed to initialize queue:', queueError);
+    return null;
+  }
 };
 
 /**
  * Send SMS via Twilio
  */
 const sendSMS = async (phone, message) => {
+  if (!twilio) {
+    logger.warn('Twilio not available, skipping SMS');
+    return { success: false, reason: 'Twilio not installed' };
+  }
+  
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;

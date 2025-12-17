@@ -1,16 +1,25 @@
 /**
  * Thermal Printer Service
  * Handles ESC/POS commands for Epson TM-T88V and compatible printers
+ * Note: Hardware features are disabled in cloud deployment
  */
 
-const ThermalPrinter = require('node-thermal-printer').printer;
-const PrinterTypes = require('node-thermal-printer').types;
 const logger = require('../utils/logger');
+
+// Try to load optional printer dependencies
+let ThermalPrinter, PrinterTypes;
+try {
+  ThermalPrinter = require('node-thermal-printer').printer;
+  PrinterTypes = require('node-thermal-printer').types;
+} catch (e) {
+  logger.warn('Printer dependencies not available - hardware printing disabled');
+}
 
 class PrinterService {
   constructor() {
     this.printer = null;
     this.isConnected = false;
+    this.isCloudMode = !ThermalPrinter; // No hardware in cloud
     this.companyName = process.env.COMPANY_NAME || 'HIT BY HUMA';
     this.currency = process.env.CURRENCY_SYMBOL || 'PKR';
   }
@@ -19,6 +28,11 @@ class PrinterService {
    * Initialize printer connection
    */
   async initialize() {
+    if (this.isCloudMode) {
+      logger.info('Running in cloud mode - printer hardware not available');
+      return false;
+    }
+    
     try {
       this.printer = new ThermalPrinter({
         type: PrinterTypes.EPSON,
@@ -46,6 +60,14 @@ class PrinterService {
    * Test printer connection
    */
   async testConnection() {
+    if (this.isCloudMode) {
+      return {
+        connected: false,
+        cloudMode: true,
+        message: 'Printer hardware not available in cloud deployment',
+      };
+    }
+    
     try {
       if (!this.printer) {
         await this.initialize();
