@@ -38,7 +38,7 @@ export default function Products() {
   });
   
   // Extract products array from response
-  const products = productsData?.products || [];
+  const products = productsData?.products || productsData || [];
 
   // Fetch categories
   const { data: categoriesData } = useQuery({
@@ -46,11 +46,12 @@ export default function Products() {
     queryFn: () => api.get('/products/categories/list').then(res => res.data)
   });
   
-  // Extract categories and transform to consistent format
-  const categories = categoriesData?.categories?.map(cat => ({
-    id: cat.CategoryID,
-    name: cat.CategoryName
-  })) || [];
+  // Extract categories and transform to consistent format (support both SQL Server and PostgreSQL formats)
+  const rawCategories = Array.isArray(categoriesData) ? categoriesData : (categoriesData?.categories || []);
+  const categories = rawCategories.map(cat => ({
+    id: cat.CategoryID || cat.category_id,
+    name: cat.CategoryName || cat.category_name
+  }));
 
   // Delete product mutation
   const deleteMutation = useMutation({
@@ -358,6 +359,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
     description: product?.description || '',
     price: product?.basePrice || '',
     cost_price: product?.costPrice || '',
+    initial_stock: product?.stock || 0,
     is_active: product?.isActive ?? true,
     has_variants: product?.hasVariants ?? false
   });
@@ -377,6 +379,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
         description: formData.description,
         basePrice: parseFloat(formData.price) || 0,
         costPrice: parseFloat(formData.cost_price) || 0,
+        initialStock: parseInt(formData.initial_stock) || 0,
         hasVariants: formData.has_variants,
         isActive: formData.is_active,
         barcode: formData.barcode,
@@ -568,7 +571,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
               </div>
 
               {/* Prices */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="label">Selling Price *</label>
                   <div className="relative">
@@ -599,6 +602,17 @@ function ProductModal({ product, categories, onClose, onSave }) {
                       className="input pl-8"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="label">Initial Stock</label>
+                  <input
+                    type="number"
+                    value={formData.initial_stock}
+                    onChange={(e) => setFormData({ ...formData, initial_stock: e.target.value })}
+                    placeholder="0"
+                    min="0"
+                    className="input"
+                  />
                 </div>
               </div>
 

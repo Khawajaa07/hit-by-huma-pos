@@ -171,7 +171,7 @@ router.post('/', authorize('products'), [
     }
     
     // Support both frontend field names (name/code) and backend field names (productName/productCode)
-    const { productCode, productName, name, code, categoryId, description, basePrice, costPrice, taxRate, barcode } = req.body;
+    const { productCode, productName, name, code, categoryId, description, basePrice, costPrice, taxRate, barcode, initialStock } = req.body;
     const finalName = productName || name;
     const finalCode = productCode || code || `PRD-${Date.now()}`;
     
@@ -195,7 +195,25 @@ router.post('/', authorize('products'), [
       }
     );
     
-    res.status(201).json(result.recordset[0]);
+    const product = result.recordset[0];
+    
+    // If initial stock is provided, create inventory record
+    if (initialStock && initialStock > 0) {
+      await db.query(
+        `INSERT INTO inventory (product_id, location_id, quantity, last_updated_by)
+         VALUES (@productId, @locationId, @quantity, @userId)
+         ON CONFLICT (product_id, location_id) 
+         DO UPDATE SET quantity = inventory.quantity + @quantity, updated_at = CURRENT_TIMESTAMP`,
+        {
+          productId: product.product_id,
+          locationId: req.user.default_location_id || 1,
+          quantity: parseInt(initialStock),
+          userId: req.user.user_id
+        }
+      );
+    }
+    
+    res.status(201).json(product);
   } catch (error) {
     next(error);
   }
