@@ -7,8 +7,8 @@ This guide will help you deploy the POS system so your client can access it onli
 | Component | Deployment Platform | Purpose |
 |-----------|---------------------|---------|
 | Frontend (React) | **Vercel** | User Interface |
-| Backend (Express) | **Railway** or **Render** | API Server |
-| Database | **Azure SQL** or **Remote SQL Server** | Data Storage |
+| Backend (Express) | **Railway** | API Server |
+| Database | **Railway PostgreSQL** | Data Storage |
 
 ---
 
@@ -16,26 +16,25 @@ This guide will help you deploy the POS system so your client can access it onli
 
 1. **GitHub Account** - Push your code to GitHub first
 2. **Vercel Account** - Free at [vercel.com](https://vercel.com)
-3. **Railway Account** - Free at [railway.app](https://railway.app) (or Render at [render.com](https://render.com))
-4. **Database Access** - Your SQL Server must be accessible from the internet
+3. **Railway Account** - Free at [railway.app](https://railway.app)
 
 ---
 
-## 🗄️ Step 1: Database Setup
+## 🗄️ Step 1: Database Setup (Railway PostgreSQL)
 
-Your backend uses **MS SQL Server**. You have two options:
+Railway provides a free PostgreSQL database that's perfect for this app.
 
-### Option A: Azure SQL (Recommended for Production)
-1. Go to [Azure Portal](https://portal.azure.com)
-2. Create a new **Azure SQL Database**
-3. Configure firewall rules to allow connections
-4. Run your `schema.sql` to create tables
-5. Note your connection details
+### 1.1 Create PostgreSQL on Railway
+1. Go to [railway.app](https://railway.app) and sign in
+2. Click **"New Project"** → **"Provision PostgreSQL"**
+3. Click on the PostgreSQL service
+4. Go to **"Variables"** tab - you'll see `DATABASE_URL` automatically created
+5. Go to **"Data"** tab to access the database console
 
-### Option B: Expose Existing SQL Server
-1. Configure your SQL Server for remote connections
-2. Open port 1433 on your firewall/router
-3. Use SQL Server Authentication (not Windows Auth)
+### 1.2 Run Schema
+1. In Railway PostgreSQL, go to **"Data"** → **"Query"**
+2. Copy the contents of `server/src/database/schema.postgres.sql`
+3. Paste and run to create all tables
 
 ---
 
@@ -52,28 +51,23 @@ git push -u origin main
 ```
 
 ### 2.2 Deploy on Railway
-1. Go to [railway.app](https://railway.app) and sign in with GitHub
-2. Click **"New Project"** → **"Deploy from GitHub repo"**
-3. Select your `pos-server` repository
-4. Railway will auto-detect Node.js
+1. In the same Railway project, click **"New"** → **"GitHub Repo"**
+2. Select your `pos-server` repository
+3. Railway will auto-detect Node.js and deploy
 
-### 2.3 Configure Environment Variables
+### 2.3 Link Database
+1. Click on your backend service
+2. Go to **"Variables"**
+3. Click **"Add Reference"** → Select the PostgreSQL service
+4. This automatically adds `DATABASE_URL`
+
+### 2.4 Add Environment Variables
 In Railway dashboard, go to **Variables** and add:
 
 ```
 PORT=5000
 NODE_ENV=production
 CLIENT_URL=https://your-app.vercel.app
-
-# Database (Use SQL Server Auth, NOT Windows Auth)
-DB_SERVER=your-server.database.windows.net
-DB_PORT=1433
-DB_NAME=HitByHumaPOS
-DB_USER=your-username
-DB_PASSWORD=your-password
-DB_ENCRYPT=true
-DB_TRUST_SERVER_CERTIFICATE=false
-DB_TRUSTED_CONNECTION=false
 
 # JWT
 JWT_SECRET=your-super-secret-key-min-32-chars
@@ -84,7 +78,9 @@ JWT_REFRESH_EXPIRES_IN=7d
 API_PREFIX=/api/v1
 ```
 
-### 2.4 Get Your Backend URL
+> **Note**: `DATABASE_URL` is automatically added when you link the PostgreSQL service!
+
+### 2.5 Get Your Backend URL
 After deployment, Railway will give you a URL like:
 `https://pos-server-production.up.railway.app`
 
@@ -157,9 +153,9 @@ CLIENT_URL=https://your-app.vercel.app
 - Check for trailing slashes (don't include them)
 
 ### Database Connection Failed
-- Ensure SQL Server allows remote connections
-- Check firewall rules allow Railway's IPs
-- Use SQL Server Authentication, not Windows Auth
+- Check Railway PostgreSQL logs for errors
+- Ensure `DATABASE_URL` is properly linked to your backend service
+- Verify the schema was run successfully
 
 ### Socket.IO Not Connecting
 - Verify `VITE_SOCKET_URL` is set correctly
@@ -177,7 +173,7 @@ CLIENT_URL=https://your-app.vercel.app
 |---------|-----------|
 | Vercel | 100GB bandwidth/month |
 | Railway | $5 credit/month (enough for small apps) |
-| Azure SQL | Free tier available (5GB) |
+| Railway PostgreSQL | Included in Railway credits |
 
 ---
 

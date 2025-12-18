@@ -57,7 +57,7 @@ export default function Products() {
   const deleteMutation = useMutation({
     mutationFn: (productId) => api.delete(`/products/${productId}`),
     onSuccess: () => {
-      queryClient.invalidateQueries(['products']);
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success('Product deleted successfully');
     },
     onError: () => toast.error('Failed to delete product')
@@ -351,15 +351,16 @@ export default function Products() {
 
 // Product Modal Component
 function ProductModal({ product, categories, onClose, onSave }) {
+  const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
     name: product?.name || '',
     sku: product?.code || '',
     barcode: product?.barcode || '',
-    category_id: product?.category?.id || '',
+    category_id: product?.category?.id || product?.categoryId || '',
     description: product?.description || '',
     price: product?.basePrice || '',
     cost_price: product?.costPrice || '',
-    initial_stock: product?.stock || 0,
+    initial_stock: product?.totalStock ?? product?.stock ?? 0,
     is_active: product?.isActive ?? true,
     has_variants: product?.hasVariants ?? false
   });
@@ -379,7 +380,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
         description: formData.description,
         basePrice: parseFloat(formData.price) || 0,
         costPrice: parseFloat(formData.cost_price) || 0,
-        initialStock: parseInt(formData.initial_stock) || 0,
+        stock: parseInt(formData.initial_stock) || 0,
         hasVariants: formData.has_variants,
         isActive: formData.is_active,
         barcode: formData.barcode,
@@ -400,9 +401,15 @@ function ProductModal({ product, categories, onClose, onSave }) {
         await api.put(`/products/${product.id}`, payload);
         toast.success('Product updated successfully');
       } else {
+        // For new products, use initialStock
+        payload.initialStock = payload.stock;
+        delete payload.stock;
         await api.post('/products', payload);
         toast.success('Product created successfully');
       }
+      
+      // Force refresh the products list
+      await queryClient.invalidateQueries({ queryKey: ['products'] });
       onSave();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to save product');

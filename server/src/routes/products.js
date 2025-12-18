@@ -338,31 +338,112 @@ router.post('/', authorize('products'), [
 router.put('/:id', authorize('products'), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { productName, name, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive } = req.body;
+    const { productName, name, code, productCode, categoryId, category_id, description, basePrice, costPrice, taxRate, isActive, barcode, initialStock, initial_stock, stock } = req.body;
     
     const finalName = productName || name;
     const finalCategoryId = categoryId || category_id;
+    const finalCode = code || productCode;
+    const finalStock = stock ?? initialStock ?? initial_stock;
+    
+    console.log('PUT /products/:id - Request body:', JSON.stringify(req.body));
+    console.log('PUT /products/:id - Parsed values:', { id, finalName, finalCode, basePrice, costPrice, isActive, finalStock, stockFromBody: stock });
     
     const result = await db.query(
       `UPDATE products 
-       SET product_name = COALESCE($1, product_name),
-           category_id = COALESCE($2, category_id),
-           description = COALESCE($3, description),
-           base_price = COALESCE($4, base_price),
-           cost_price = COALESCE($5, cost_price),
-           tax_rate = COALESCE($6, tax_rate),
-           is_active = COALESCE($7, is_active),
+       SET product_name = COALESCE(@finalName, product_name),
+           product_code = COALESCE(@finalCode, product_code),
+           category_id = COALESCE(@finalCategoryId, category_id),
+           description = COALESCE(@description, description),
+           base_price = COALESCE(@basePrice, base_price),
+           cost_price = COALESCE(@costPrice, cost_price),
+           tax_rate = COALESCE(@taxRate, tax_rate),
+           is_active = COALESCE(@isActive, is_active),
            updated_at = CURRENT_TIMESTAMP
-       WHERE product_id = $8
+       WHERE product_id = @productId
        RETURNING *`,
-      [finalName, finalCategoryId, description, basePrice, costPrice, taxRate, isActive, parseInt(id)]
+      { finalName, finalCode, finalCategoryId, description, basePrice, costPrice, taxRate, isActive, productId: parseInt(id) }
     );
     
     if (result.recordset.length === 0) {
       throw new NotFoundError('Product not found');
     }
     
-    res.json(result.recordset[0]);
+    const p = result.recordset[0];
+    
+    // Update stock if provided
+    if (finalStock !== null && finalStock !== undefined) {
+      // Get the default variant for this product
+      const variantResult = await db.query(
+        `SELECT variant_id FROM product_variants WHERE product_id = @productId LIMIT 1`,
+        { productId: parseInt(id) }
+      );
+      
+      let variantId;
+      
+      if (variantResult.recordset.length > 0) {
+        variantId = variantResult.recordset[0].variant_id;
+      } else {
+        // Create a default variant if none exists
+        const newVariantResult = await db.query(
+          `INSERT INTO product_variants (product_id, sku, variant_name, price, cost_price, is_active)
+           VALUES (@productId, @sku, 'Default', @price, @costPrice, true)
+           RETURNING variant_id`,
+          { productId: parseInt(id), sku: p.product_code, price: p.base_price, costPrice: p.cost_price || 0 }
+        );
+        variantId = newVariantResult.recordset[0].variant_id;
+      }
+      
+      const locationId = req.user?.default_location_id || 1;
+      const stockQty = parseInt(finalStock);
+      
+      console.log('Updating stock:', { variantId, locationId, stockQty });
+      
+      // Check if inventory record exists
+      const existingInventory = await db.query(
+        `SELECT inventory_id FROM inventory WHERE variant_id = @variantId AND location_id = @locationId`,
+        { variantId, locationId }
+      );
+      
+      if (existingInventory.recordset.length > 0) {
+        // Update existing inventory record
+        await db.query(
+          `UPDATE inventory SET quantity_on_hand = @stockQty, updated_at = CURRENT_TIMESTAMP
+           WHERE variant_id = @variantId AND location_id = @locationId`,
+          { stockQty, variantId, locationId }
+        );
+      } else {
+        // Insert new inventory record
+        await db.query(
+          `INSERT INTO inventory (variant_id, location_id, quantity_on_hand, updated_at)
+           VALUES (@variantId, @locationId, @stockQty, CURRENT_TIMESTAMP)`,
+          { variantId, locationId, stockQty }
+        );
+      }
+    }
+    
+    // Get updated total stock
+    const stockResult = await db.query(
+      `SELECT COALESCE(SUM(i.quantity_on_hand), 0) as total_stock 
+       FROM product_variants pv 
+       LEFT JOIN inventory i ON pv.variant_id = i.variant_id 
+       WHERE pv.product_id = @productId`,
+      { productId: parseInt(id) }
+    );
+    
+    // Return transformed response matching GET format
+    res.json({
+      id: p.product_id,
+      code: p.product_code,
+      name: p.product_name,
+      categoryId: p.category_id,
+      description: p.description,
+      basePrice: p.base_price,
+      costPrice: p.cost_price,
+      taxRate: p.tax_rate,
+      isActive: p.is_active,
+      totalStock: parseInt(stockResult.recordset[0]?.total_stock) || 0,
+      updatedAt: p.updated_at
+    });
   } catch (error) {
     next(error);
   }
