@@ -87,10 +87,10 @@ router.get('/dashboard', async (req, res, next) => {
     
     // Hourly sales
     const hourlyResult = await pool.query(
-      `SELECT EXTRACT(HOUR FROM created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue
-       FROM sales
-       WHERE status = 'completed' ${timeFilter} ${locationFilter}
-       GROUP BY EXTRACT(HOUR FROM created_at)
+      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue
+       FROM sales s
+       WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
+       GROUP BY EXTRACT(HOUR FROM s.created_at)
        ORDER BY hour`,
       params
     );
@@ -174,10 +174,10 @@ router.get('/hourly-sales', async (req, res, next) => {
     const pool = db.getPool();
     const params = [];
     const result = await pool.query(
-      `SELECT EXTRACT(HOUR FROM created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue, COUNT(*) as transactions
-       FROM sales
-       WHERE DATE(created_at) = CURRENT_DATE AND status = 'completed'
-       GROUP BY EXTRACT(HOUR FROM created_at)
+      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue, COUNT(*) as transactions
+       FROM sales s
+       WHERE DATE(s.created_at) = CURRENT_DATE AND s.status = 'completed'
+       GROUP BY EXTRACT(HOUR FROM s.created_at)
        ORDER BY hour`
     );
     res.json({ data: result.rows.map(h => ({ hour: parseInt(h.hour), sales: parseFloat(h.revenue) || 0, orders: parseInt(h.transactions) || 0 })) });
@@ -266,15 +266,15 @@ router.get('/sales', authorize('reports'), async (req, res, next) => {
       params.push(endDate);
     }
     
-    let groupByClause = 'DATE(created_at)';
-    let selectDate = 'DATE(created_at) as date';
+    let groupByClause = 'DATE(s.created_at)';
+    let selectDate = 'DATE(s.created_at) as date';
     
     if (groupBy === 'month') {
-      groupByClause = "TO_CHAR(created_at, 'YYYY-MM')";
-      selectDate = "TO_CHAR(created_at, 'YYYY-MM') as date";
+      groupByClause = "TO_CHAR(s.created_at, 'YYYY-MM')";
+      selectDate = "TO_CHAR(s.created_at, 'YYYY-MM') as date";
     } else if (groupBy === 'week') {
-      groupByClause = "DATE_TRUNC('week', created_at)";
-      selectDate = "DATE_TRUNC('week', created_at) as date";
+      groupByClause = "DATE_TRUNC('week', s.created_at)";
+      selectDate = "DATE_TRUNC('week', s.created_at) as date";
     }
     
     const result = await pool.query(
