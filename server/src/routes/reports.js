@@ -23,22 +23,22 @@ router.get('/dashboard', async (req, res, next) => {
     // Build time filter based on range or explicit start/end dates
     // timeFilter contains SQL fragment starting with ' AND '
     // Default to this week's data when no explicit range is provided
-    let timeFilter = ` AND created_at >= date_trunc('week', CURRENT_DATE)`;
+    let timeFilter = ` AND s.created_at >= date_trunc('week', CURRENT_DATE)`;
     if (startDate) {
-      timeFilter = ` AND created_at >= $${paramIndex++}`;
+      timeFilter = ` AND s.created_at >= $${paramIndex++}`;
       params.push(startDate);
       if (endDate) {
-        timeFilter += ` AND created_at <= $${paramIndex++}`;
+        timeFilter += ` AND s.created_at <= $${paramIndex++}`;
         params.push(endDate);
       }
     } else if (range === 'week') {
-      timeFilter = ` AND created_at >= date_trunc('week', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= date_trunc('week', CURRENT_DATE)`;
     } else if (range === 'today') {
-      timeFilter = ` AND DATE(created_at) = CURRENT_DATE`;
+      timeFilter = ` AND DATE(s.created_at) = CURRENT_DATE`;
     } else if (range === 'month') {
-      timeFilter = ` AND created_at >= date_trunc('month', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= date_trunc('month', CURRENT_DATE)`;
     } else if (range === 'year') {
-      timeFilter = ` AND created_at >= date_trunc('year', CURRENT_DATE)`;
+      timeFilter = ` AND s.created_at >= date_trunc('year', CURRENT_DATE)`;
     }
 
     // Today's/selected range stats (include discounts)
