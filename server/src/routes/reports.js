@@ -33,6 +33,8 @@ router.get('/dashboard', async (req, res, next) => {
       }
     } else if (range === 'week') {
       timeFilter = ` AND created_at >= date_trunc('week', CURRENT_DATE)`;
+    } else if (range === 'today') {
+      timeFilter = ` AND DATE(created_at) = CURRENT_DATE`;
     } else if (range === 'month') {
       timeFilter = ` AND created_at >= date_trunc('month', CURRENT_DATE)`;
     } else if (range === 'year') {
