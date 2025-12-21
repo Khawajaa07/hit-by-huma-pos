@@ -67,7 +67,7 @@ export default function Dashboard() {
     queryKey: ['recent-transactions'],
     queryFn: () => api.get('/sales?limit=10').then(res => res.data)
   });
-  
+
   // Extract sales array from response
   const recentTransactions = recentTransactionsData?.sales || [];
 
@@ -84,34 +84,39 @@ export default function Dashboard() {
   });
 
   // Map server response to expected stats format
+  // Backend returns both flattened summary (totalRevenue, totalOrders, etc.) 
+  // and nested today object - use flattened first, fall back to nested
   const today = dashboardData?.today || {};
   const paymentBreakdown = dashboardData?.paymentBreakdown || [];
-  
-  // Calculate cash and card sales from payment breakdown
-  const cashSales = paymentBreakdown
-    .filter(p => (p.MethodType || p.method_type) === 'CASH')
-    .reduce((sum, p) => sum + (p.Total || p.total || 0), 0);
-  const cardSales = paymentBreakdown
-    .filter(p => (p.MethodType || p.method_type) === 'CARD')
-    .reduce((sum, p) => sum + (p.Total || p.total || 0), 0);
+
+  // Calculate cash and card sales from payment breakdown (lowercase for PostgreSQL)
+  const cashSales = dashboardData?.cashSales || paymentBreakdown
+    .filter(p => (p.method_type || p.MethodType || '').toLowerCase() === 'cash')
+    .reduce((sum, p) => sum + parseFloat(p.total || p.Total || 0), 0);
+  const cardSales = dashboardData?.cardSales || paymentBreakdown
+    .filter(p => (p.method_type || p.MethodType || '').toLowerCase().includes('card'))
+    .reduce((sum, p) => sum + parseFloat(p.total || p.Total || 0), 0);
 
   const stats = {
-    totalRevenue: parseFloat(today.TotalSales || today.revenue) || 0,
-    totalOrders: parseInt(today.TransactionCount || today.transactions) || 0,
-    avgOrderValue: parseFloat(today.AverageTransaction || today.avg_transaction) || 0,
-    customersServed: parseInt(today.TransactionCount || today.transactions) || 0,
+    // Use flattened summary first (from backend), then try nested today object
+    totalRevenue: parseFloat(dashboardData?.totalRevenue) || parseFloat(today.revenue) || parseFloat(today.TotalSales) || 0,
+    totalOrders: parseInt(dashboardData?.totalOrders) || parseInt(today.transactions) || parseInt(today.TransactionCount) || 0,
+    avgOrderValue: parseFloat(dashboardData?.avgOrderValue) || parseFloat(today.avg_transaction) || parseFloat(today.AverageTransaction) || 0,
+    customersServed: parseInt(dashboardData?.totalOrders) || parseInt(today.transactions) || parseInt(today.TransactionCount) || 0,
     revenueChange: parseFloat(today.growthPercent) || 0,
     ordersChange: parseFloat(today.growthPercent) || 0,
     avgOrderChange: 0,
     customersChange: 0,
-    totalDiscounts: parseFloat(today.TotalDiscounts || today.discounts) || 0,
+    totalDiscounts: parseFloat(dashboardData?.totalDiscounts) || parseFloat(today.discounts) || parseFloat(today.TotalDiscounts) || 0,
     cashSales,
     cardSales,
-    itemsSold: parseInt(today.ItemsSold || today.itemsSold) || 0,
+    itemsSold: parseInt(dashboardData?.itemsSold) || parseInt(today.itemsSold) || parseInt(today.ItemsSold) || 0,
     returns: 0,
-    avgItemsPerOrder: 0
+    avgItemsPerOrder: dashboardData?.totalOrders > 0
+      ? ((dashboardData?.itemsSold || 0) / dashboardData.totalOrders).toFixed(1)
+      : 0
   };
-  
+
   const realtime = realtimeData || {};
 
   return (
@@ -122,7 +127,7 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-500 mt-1">Welcome back! Here's your business overview.</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           {/* Date Range Selector */}
           <div className="flex bg-white rounded-lg border p-1">
@@ -135,17 +140,16 @@ export default function Dashboard() {
               <button
                 key={option.value}
                 onClick={() => setDateRange(option.value)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  dateRange === option.value
-                    ? 'bg-primary-600 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${dateRange === option.value
+                  ? 'bg-primary-600 text-white'
+                  : 'text-gray-600 hover:bg-gray-100'
+                  }`}
               >
                 {option.label}
               </button>
             ))}
           </div>
-          
+
           <button
             onClick={() => refetch()}
             className="p-2 bg-white border rounded-lg hover:bg-gray-50 transition-colors"
@@ -256,7 +260,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-          
+
           <div className="h-64">
             {(hourlyData?.data || hourlyData)?.length > 0 ? (
               <div className="flex items-end justify-between h-full gap-1 pt-4">
@@ -311,7 +315,7 @@ export default function Dashboard() {
                 const sales = parseFloat(category.sales || category.revenue) || 0;
                 const percentage = totalSales > 0 ? (sales / totalSales) * 100 : 0;
                 const colors = [
-                  'bg-primary-500', 'bg-blue-500', 'bg-green-500', 
+                  'bg-primary-500', 'bg-blue-500', 'bg-green-500',
                   'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'
                 ];
                 return (
@@ -363,22 +367,21 @@ export default function Dashboard() {
                   key={i}
                   className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                    i === 0 ? 'bg-yellow-400 text-yellow-900' :
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${i === 0 ? 'bg-yellow-400 text-yellow-900' :
                     i === 1 ? 'bg-gray-300 text-gray-700' :
-                    i === 2 ? 'bg-amber-600 text-white' :
-                    'bg-gray-200 text-gray-600'
-                  }`}>
+                      i === 2 ? 'bg-amber-600 text-white' :
+                        'bg-gray-200 text-gray-600'
+                    }`}>
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 truncate">
-                      {product.ProductName || product.product_name}{(product.VariantName || product.variant_name) ? ` - ${product.VariantName || product.variant_name}` : ''}
+                      {product.name || product.ProductName || product.product_name}{(product.variant || product.VariantName || product.variant_name) ? ` - ${product.variant || product.VariantName || product.variant_name}` : ''}
                     </p>
-                    <p className="text-xs text-gray-500">{parseInt(product.QuantitySold || product.sold) || 0} sold</p>
+                    <p className="text-xs text-gray-500">{parseInt(product.quantity || product.QuantitySold || product.sold) || 0} sold</p>
                   </div>
                   <p className="font-semibold text-gray-900">
-                    ${(parseFloat(product.Revenue || product.revenue) || 0).toLocaleString()}
+                    ${(parseFloat(product.revenue || product.Revenue) || 0).toLocaleString()}
                   </p>
                 </div>
               ))
@@ -406,29 +409,30 @@ export default function Dashboard() {
                 const empName = employee.name || `${employee.first_name || ''} ${employee.last_name || ''}`.trim() || 'Unknown';
                 const initials = empName.split(' ').filter(n => n.length > 0).map(n => n[0]).join('').substring(0, 2) || '?';
                 return (
-                <div
-                  key={i}
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-purple-600 rounded-full flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">
-                      {initials}
-                    </span>
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
+                  >
+                    <div className="w-10 h-10 bg-gradient-to-br from-primary-500 to-purple-600 rounded-full flex items-center justify-center">
+                      <span className="text-white font-bold text-sm">
+                        {initials}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{empName}</p>
+                      <p className="text-xs text-gray-500">{parseInt(employee.transactions) || 0} sales</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-gray-900">
+                        ${(parseFloat(employee.sales || employee.revenue) || 0).toLocaleString()}
+                      </p>
+                      {i === 0 && (
+                        <span className="text-xs text-yellow-600">🏆 Top</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{empName}</p>
-                    <p className="text-xs text-gray-500">{parseInt(employee.transactions) || 0} sales</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-gray-900">
-                      ${(parseFloat(employee.sales || employee.revenue) || 0).toLocaleString()}
-                    </p>
-                    {i === 0 && (
-                      <span className="text-xs text-yellow-600">🏆 Top</span>
-                    )}
-                  </div>
-                </div>
-              )})
+                )
+              })
             ) : (
               <div className="text-center py-8 text-gray-400">
                 <UserGroupIcon className="w-10 h-10 mx-auto mb-2" />
@@ -457,13 +461,11 @@ export default function Dashboard() {
               inventoryAlerts.slice(0, 5).map((item, i) => (
                 <div
                   key={i}
-                  className={`flex items-center gap-3 p-3 rounded-lg ${
-                    item.quantity <= 0 ? 'bg-red-50' : 'bg-yellow-50'
-                  }`}
+                  className={`flex items-center gap-3 p-3 rounded-lg ${item.quantity <= 0 ? 'bg-red-50' : 'bg-yellow-50'
+                    }`}
                 >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    item.quantity <= 0 ? 'bg-red-100' : 'bg-yellow-100'
-                  }`}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${item.quantity <= 0 ? 'bg-red-100' : 'bg-yellow-100'
+                    }`}>
                     {item.quantity <= 0 ? (
                       <ExclamationTriangleIcon className="w-5 h-5 text-red-600" />
                     ) : (
@@ -539,11 +541,10 @@ export default function Dashboard() {
                       -
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        (tx.Status || tx.status) === 'completed' || (tx.Status || tx.status) === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${(tx.Status || tx.status) === 'completed' || (tx.Status || tx.status) === 'COMPLETED' ? 'bg-green-100 text-green-700' :
                         (tx.Status || tx.status) === 'voided' || (tx.Status || tx.status) === 'VOIDED' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
+                          'bg-gray-100 text-gray-700'
+                        }`}>
                         {tx.Status || tx.status || 'N/A'}
                       </span>
                     </td>
@@ -622,10 +623,9 @@ function MetricCard({ title, value, change, icon: Icon, iconBg, iconColor, loadi
           </div>
           <p className="text-3xl font-bold text-gray-900 mb-2">{value}</p>
           {change !== undefined && change !== null && (
-            <div className={`flex items-center gap-1 text-sm ${
-              isPositive ? 'text-green-600' :
+            <div className={`flex items-center gap-1 text-sm ${isPositive ? 'text-green-600' :
               isNegative ? 'text-red-600' : 'text-gray-500'
-            }`}>
+              }`}>
               {isPositive ? (
                 <ArrowTrendingUpIcon className="w-4 h-4" />
               ) : isNegative ? (

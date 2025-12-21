@@ -28,18 +28,25 @@ export const useCartStore = create(
           set({ items: newItems });
         } else {
           // Add new item
+          // Use productName if variantName is 'Default' or empty
+          const displayName = product.variantName && product.variantName !== 'Default'
+            ? (product.productName ? `${product.productName} - ${product.variantName}` : product.variantName)
+            : (product.productName || product.name || 'Unknown Product');
+
           set({
             items: [...items, {
               variantId: product.variantId,
               sku: product.sku,
               barcode: product.barcode,
-              name: product.variantName || product.productName,
+              name: displayName,
               productName: product.productName,
+              variantName: product.variantName,
               price: product.price,
               originalPrice: product.price,
               quantity: 1,
               discountAmount: 0,
               imageUrl: product.imageUrl,
+              stock: product.stock,
             }],
           });
         }
@@ -153,7 +160,7 @@ export const useCartStore = create(
       suspendCart: (note = '') => {
         const { items, customer, discountAmount, discountType, discountReason, notes, suspendedCarts } = get();
         if (items.length === 0) return;
-        
+
         const cartId = Date.now().toString();
         const suspendedCart = {
           id: cartId,
@@ -165,7 +172,7 @@ export const useCartStore = create(
           notes: note || notes,
           suspendedAt: new Date().toISOString(),
         };
-        
+
         set({
           suspendedCarts: [...suspendedCarts, suspendedCart],
           items: [],
@@ -176,7 +183,7 @@ export const useCartStore = create(
           notes: null,
           parkedSaleId: null,
         });
-        
+
         return cartId;
       },
 
@@ -185,7 +192,7 @@ export const useCartStore = create(
         const { suspendedCarts } = get();
         const cart = suspendedCarts.find(c => c.id === cartId);
         if (!cart) return false;
-        
+
         set({
           items: cart.items,
           customer: cart.customer,
@@ -195,7 +202,7 @@ export const useCartStore = create(
           notes: cart.notes,
           suspendedCarts: suspendedCarts.filter(c => c.id !== cartId),
         });
-        
+
         return true;
       },
 

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { 
-  MagnifyingGlassIcon, 
-  PlusIcon, 
-  MinusIcon, 
+import {
+  MagnifyingGlassIcon,
+  PlusIcon,
+  MinusIcon,
   TrashIcon,
   UserIcon,
   ReceiptPercentIcon,
@@ -53,7 +53,7 @@ export default function POS() {
     queryKey: ['pos-categories'],
     queryFn: () => api.get('/products/categories/list').then(res => res.data)
   });
-  
+
   // Transform categories to consistent format
   const categories = categoriesData?.categories?.map(cat => ({
     id: cat.CategoryID,
@@ -65,18 +65,18 @@ export default function POS() {
     queryKey: ['payment-methods'],
     queryFn: () => api.get('/sales/payment-methods/list').then(res => res.data)
   });
-  
+
   // Transform payment methods - handle both array and object with paymentMethods property
-  const paymentMethods = Array.isArray(paymentMethodsData) 
-    ? paymentMethodsData 
+  const paymentMethods = Array.isArray(paymentMethodsData)
+    ? paymentMethodsData
     : (paymentMethodsData?.paymentMethods || []);
-  
+
   const getPaymentMethodId = (type) => {
     // Find by method_type (snake_case from database)
     let method = paymentMethods.find(m => m.method_type === type || m.MethodType === type);
     // If not found, try by method_name (case-insensitive)
     if (!method) {
-      method = paymentMethods.find(m => 
+      method = paymentMethods.find(m =>
         m.method_name?.toLowerCase().includes(type.toLowerCase()) ||
         m.MethodName?.toLowerCase().includes(type.toLowerCase())
       );
@@ -109,7 +109,7 @@ export default function POS() {
     },
     enabled: true
   });
-  
+
   // Normalize products data - handle both quick search results and regular products
   const products = searchResults?.results || searchResults?.products || [];
 
@@ -124,9 +124,9 @@ export default function POS() {
       // Trigger receipt print - server returns saleId
       const saleId = response.data.saleId || response.data.transaction_id;
       if (saleId) {
-        api.post('/hardware/print-receipt', { 
+        api.post('/hardware/print-receipt', {
           saleId: saleId
-        }).catch(() => {}); // Ignore print errors
+        }).catch(() => { }); // Ignore print errors
       }
     },
     onError: (error) => {
@@ -139,8 +139,8 @@ export default function POS() {
   useEffect(() => {
     const handleKeyPress = (e) => {
       // Ignore if focused on an input
-      if (document.activeElement.tagName === 'INPUT' && 
-          document.activeElement !== searchInputRef.current) {
+      if (document.activeElement.tagName === 'INPUT' &&
+        document.activeElement !== searchInputRef.current) {
         return;
       }
 
@@ -179,13 +179,13 @@ export default function POS() {
       if (response.data) {
         const product = response.data;
         const stock = parseInt(product.stock) || 0;
-        
+
         // Check if product is in stock
         if (stock <= 0) {
           toast.error(`${product.productName} is out of stock`);
           return;
         }
-        
+
         // Check if adding more would exceed stock
         const existingItem = items.find(item => item.variantId === product.variantId);
         const currentQty = existingItem?.quantity || 0;
@@ -193,7 +193,7 @@ export default function POS() {
           toast.error(`Only ${stock} available in stock`);
           return;
         }
-        
+
         addItem({
           variantId: product.variantId,
           productId: product.productId,
@@ -220,7 +220,7 @@ export default function POS() {
     // Quick search returns: variant_id, sku, barcode, variant_name, price, product_name, product_code, product_id, stock
     // Regular products returns: id, code, name, basePrice, variantId, sku, barcode, totalStock
     const stock = parseInt(product.stock) ?? parseInt(product.totalStock) ?? 0;
-    
+
     const normalizedItem = {
       variantId: product.variantId || product.variant_id || (product.variants?.[0]?.id),
       productId: product.productId || product.product_id || product.id,
@@ -232,19 +232,19 @@ export default function POS() {
       imageUrl: product.imageUrl || product.image_url || product.imageURL,
       stock: stock
     };
-    
+
     if (!normalizedItem.variantId) {
       toast.error('Product variant not found. Please try again.');
       console.error('Missing variantId for product:', product);
       return;
     }
-    
+
     // Check if product is in stock
     if (stock <= 0) {
       toast.error(`${normalizedItem.productName} is out of stock`);
       return;
     }
-    
+
     // Check if adding more would exceed stock
     const existingItem = items.find(item => item.variantId === normalizedItem.variantId);
     const currentQty = existingItem?.quantity || 0;
@@ -252,7 +252,7 @@ export default function POS() {
       toast.error(`Only ${stock} available in stock`);
       return;
     }
-    
+
     addItem(normalizedItem);
     const displayName = normalizedItem.variantName && normalizedItem.variantName !== 'Default'
       ? `${normalizedItem.productName} - ${normalizedItem.variantName}`
@@ -277,9 +277,9 @@ export default function POS() {
       toast.error('Invalid payment method. Please try again.');
       return;
     }
-    
+
     const totalAmount = getTotal();
-    
+
     const saleData = {
       locationId: 1, // TODO: Get from user's current location/settings
       customerId: customer?.id || customer?.customer_id || null,
@@ -335,11 +335,10 @@ export default function POS() {
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
             <button
               onClick={() => setSelectedCategory(null)}
-              className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${
-                !selectedCategory
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${!selectedCategory
+                ? 'bg-primary-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
             >
               All Products
             </button>
@@ -347,11 +346,10 @@ export default function POS() {
               <button
                 key={cat.id}
                 onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${
-                  selectedCategory === cat.id
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-medium transition-colors ${selectedCategory === cat.id
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
               >
                 {cat.name}
               </button>
@@ -378,28 +376,26 @@ export default function POS() {
                 const id = product.variantId || product.id || index;
                 const name = product.productName || product.name;
                 const variantName = product.variantName;
-                const displayName = variantName && variantName !== 'Default' 
-                  ? `${name} - ${variantName}` 
+                const displayName = variantName && variantName !== 'Default'
+                  ? `${name} - ${variantName}`
                   : name;
                 const sku = product.sku || product.code;
                 const price = product.price || product.basePrice || 0;
                 const imageUrl = product.imageUrl || product.imageURL;
                 const stock = product.stock ?? product.totalStock ?? 0;
-                
+
                 return (
                   <button
                     key={id}
                     onClick={() => stock > 0 && handleProductClick(product)}
                     disabled={stock <= 0}
-                    className={`bg-white rounded-xl p-4 text-left transition-shadow border border-gray-100 group ${
-                      stock <= 0 
-                        ? 'opacity-60 cursor-not-allowed' 
-                        : 'hover:shadow-lg'
-                    }`}
+                    className={`bg-white rounded-xl p-4 text-left transition-shadow border border-gray-100 group ${stock <= 0
+                      ? 'opacity-60 cursor-not-allowed'
+                      : 'hover:shadow-lg'
+                      }`}
                   >
-                    <div className={`w-full h-32 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden relative ${
-                      stock <= 0 ? 'grayscale' : ''
-                    }`}>
+                    <div className={`w-full h-32 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden relative ${stock <= 0 ? 'grayscale' : ''
+                      }`}>
                       {stock <= 0 && (
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
                           <span className="text-white font-bold text-sm bg-red-600 px-3 py-1 rounded-full">
@@ -423,13 +419,12 @@ export default function POS() {
                       <span className="text-lg font-bold text-primary-600">
                         ${parseFloat(price).toFixed(2)}
                       </span>
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        stock > 10
-                          ? 'bg-green-100 text-green-700'
-                          : stock > 0
+                      <span className={`text-xs px-2 py-1 rounded-full ${stock > 10
+                        ? 'bg-green-100 text-green-700'
+                        : stock > 0
                           ? 'bg-yellow-100 text-yellow-700'
                           : 'bg-red-100 text-red-700'
-                      }`}>
+                        }`}>
                         {stock > 0 ? `${stock} left` : 'Out of stock'}
                       </span>
                     </div>
@@ -526,63 +521,72 @@ export default function POS() {
               <p className="text-sm">Scan or select products to add</p>
             </div>
           ) : (
-            items.map((item) => (
-              <div
-                key={`${item.product_id}-${item.variant_id || ''}`}
-                className="bg-gray-50 rounded-lg p-3"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-12 h-12 bg-gray-200 rounded-lg flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-gray-900 truncate">{item.name}</h4>
-                    {item.variant_name && (
-                      <p className="text-xs text-gray-500">{item.variant_name}</p>
-                    )}
-                    <p className="text-sm text-primary-600 font-medium">
-                      ${parseFloat(item.price).toFixed(2)}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => removeItem(item.variantId)}
-                    className="p-1 text-gray-400 hover:text-red-500"
-                  >
-                    <XMarkIcon className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="flex items-center justify-between mt-2">
-                  <div className="flex items-center gap-2">
+            items.map((item) => {
+              // Display product name, with variant suffix if not "Default"
+              const displayName = item.name && item.name !== 'Default'
+                ? item.name
+                : (item.productName || item.name || 'Unknown Product');
+              const variantLabel = item.name && item.name !== 'Default' && item.name !== item.productName
+                ? item.name.replace(item.productName + ' - ', '')
+                : null;
+
+              return (
+                <div
+                  key={item.variantId || `${item.productId}-${item.sku}`}
+                  className="bg-gray-50 rounded-lg p-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 bg-gray-200 rounded-lg flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900 truncate">{displayName}</h4>
+                      {variantLabel && (
+                        <p className="text-xs text-gray-500">{variantLabel}</p>
+                      )}
+                      <p className="text-sm text-primary-600 font-medium">
+                        ${parseFloat(item.price).toFixed(2)}
+                      </p>
+                    </div>
                     <button
-                      onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
-                      className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
+                      onClick={() => removeItem(item.variantId)}
+                      className="p-1 text-gray-400 hover:text-red-500"
                     >
-                      <MinusIcon className="w-4 h-4" />
+                      <XMarkIcon className="w-4 h-4" />
                     </button>
-                    <span className="w-8 text-center font-medium">{item.quantity}</span>
-                    <button
-                      onClick={() => {
-                        const stock = item.stock || 0;
-                        if (item.quantity >= stock) {
-                          toast.error(`Only ${stock} available in stock`);
-                          return;
-                        }
-                        updateQuantity(item.variantId, item.quantity + 1);
-                      }}
-                      disabled={item.quantity >= (item.stock || 0)}
-                      className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${
-                        item.quantity >= (item.stock || 0) 
-                          ? 'opacity-50 cursor-not-allowed' 
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
+                        className="w-8 h-8 flex items-center justify-center bg-white border rounded-lg hover:bg-gray-100"
+                      >
+                        <MinusIcon className="w-4 h-4" />
+                      </button>
+                      <span className="w-8 text-center font-medium">{item.quantity}</span>
+                      <button
+                        onClick={() => {
+                          const stock = item.stock || 0;
+                          if (item.quantity >= stock) {
+                            toast.error(`Only ${stock} available in stock`);
+                            return;
+                          }
+                          updateQuantity(item.variantId, item.quantity + 1);
+                        }}
+                        disabled={item.quantity >= (item.stock || 0)}
+                        className={`w-8 h-8 flex items-center justify-center bg-white border rounded-lg ${item.quantity >= (item.stock || 0)
+                          ? 'opacity-50 cursor-not-allowed'
                           : 'hover:bg-gray-100'
-                      }`}
-                    >
-                      <PlusIcon className="w-4 h-4" />
-                    </button>
+                          }`}
+                      >
+                        <PlusIcon className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <span className="font-semibold text-gray-900">
+                      ${(item.quantity * parseFloat(item.price)).toFixed(2)}
+                    </span>
                   </div>
-                  <span className="font-semibold text-gray-900">
-                    ${(item.quantity * parseFloat(item.price)).toFixed(2)}
-                  </span>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -848,21 +852,19 @@ function DiscountModal({ currentDiscount, subtotal, onClose, onApply }) {
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setDiscountType('percent')}
-            className={`flex-1 py-2 rounded-lg font-medium ${
-              discountType === 'percent'
-                ? 'bg-primary-600 text-white'
-                : 'bg-gray-100 text-gray-700'
-            }`}
+            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'percent'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-700'
+              }`}
           >
             Percentage %
           </button>
           <button
             onClick={() => setDiscountType('fixed')}
-            className={`flex-1 py-2 rounded-lg font-medium ${
-              discountType === 'fixed'
-                ? 'bg-primary-600 text-white'
-                : 'bg-gray-100 text-gray-700'
-            }`}
+            className={`flex-1 py-2 rounded-lg font-medium ${discountType === 'fixed'
+              ? 'bg-primary-600 text-white'
+              : 'bg-gray-100 text-gray-700'
+              }`}
           >
             Fixed Amount $
           </button>

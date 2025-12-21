@@ -38,25 +38,19 @@ export default function Reports() {
   });
 
   // Normalize sales summary from dashboard data
-  const salesSummary = dashboardData?.today ? {
-    totalSales: dashboardData.today.TotalSales || 0,
-    totalTransactions: dashboardData.today.TransactionCount || 0,
-    averageOrder: dashboardData.today.AverageTransaction || 0,
-    customersServed: dashboardData.today.TransactionCount || 0,
-    salesChange: dashboardData.today.growthPercent || 0
+  const salesSummary = dashboardData ? {
+    totalSales: dashboardData.totalRevenue || dashboardData.today?.revenue || 0,
+    totalTransactions: dashboardData.totalOrders || dashboardData.today?.transactions || 0,
+    averageOrder: dashboardData.avgOrderValue || dashboardData.today?.avg_transaction || 0,
+    customersServed: dashboardData.totalOrders || dashboardData.today?.transactions || 0,
+    salesChange: dashboardData.today?.growthPercent || 0
   } : null;
 
-  // Fetch top products
-  const { data: topProductsData } = useQuery({
-    queryKey: ['top-products', dateRange, startDate, endDate],
-    queryFn: () => api.get(`/reports/top-products?${getDateParams()}&limit=10`).then(res => res.data)
-  });
-
-  // Normalize top products
-  const topProducts = (topProductsData || []).map(p => ({
-    name: p.name,
-    quantity: p.quantity,
-    revenue: p.revenue
+  // Use topProducts from dashboard data instead of separate endpoint
+  const topProducts = (dashboardData?.topProducts || []).map(p => ({
+    name: p.name || p.product_name,
+    quantity: p.quantity || p.sold || 0,
+    revenue: p.revenue || 0
   }));
 
   // Fetch category breakdown
@@ -65,11 +59,11 @@ export default function Reports() {
     queryFn: () => api.get(`/reports/category-breakdown?${getDateParams()}`).then(res => res.data)
   });
 
-  // Normalize category breakdown
-  const categoryBreakdown = (categoryData || []).map(c => ({
-    name: c.name,
-    sales: c.sales,
-    units: c.units
+  // Normalize category breakdown - use data property from API response
+  const categoryBreakdown = (categoryData?.data || categoryData || []).map(c => ({
+    name: c.name || c.category_name || 'Uncategorized',
+    sales: parseFloat(c.revenue) || parseFloat(c.sales) || 0,
+    units: parseInt(c.units) || parseInt(c.units_sold) || 0
   }));
 
   // Fetch hourly sales
@@ -78,11 +72,11 @@ export default function Reports() {
     queryFn: () => api.get(`/reports/hourly-sales?${getDateParams()}`).then(res => res.data)
   });
 
-  // Normalize hourly sales
-  const hourlySales = (hourlyData || []).map(h => ({
+  // Normalize hourly sales - use data property from API response
+  const hourlySales = (hourlyData?.data || dashboardData?.hourlySales || []).map(h => ({
     hour: h.hour,
-    orders: h.orders,
-    sales: h.sales
+    orders: h.orders || h.transactions || 0,
+    sales: parseFloat(h.sales) || parseFloat(h.revenue) || 0
   }));
 
   // Fetch employee performance
@@ -91,18 +85,18 @@ export default function Reports() {
     queryFn: () => api.get(`/reports/employee-performance?${getDateParams()}`).then(res => res.data)
   });
 
-  // Normalize employee performance
-  const employeePerformance = (employeeData || []).map(e => ({
-    name: e.name,
-    transactions: e.transactions,
-    sales: e.sales,
-    avgTransaction: e.transactions > 0 ? e.sales / e.transactions : 0
+  // Normalize employee performance - use data property from API response
+  const employeePerformance = (employeeData?.data || []).map(e => ({
+    name: e.name || `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+    transactions: parseInt(e.transactions) || 0,
+    sales: parseFloat(e.revenue) || parseFloat(e.sales) || 0,
+    avgTransaction: e.transactions > 0 ? (parseFloat(e.revenue) || parseFloat(e.sales) || 0) / e.transactions : 0
   }));
 
   // Normalize payment breakdown from dashboard data
   const paymentMethods = (dashboardData?.paymentBreakdown || []).map(p => ({
-    type: p.MethodName || p.MethodType,
-    amount: p.Total || 0
+    type: p.method_name || p.MethodName || p.method_type || 'Unknown',
+    amount: parseFloat(p.total) || parseFloat(p.Total) || 0
   }));
 
   const handleExport = (type) => {
