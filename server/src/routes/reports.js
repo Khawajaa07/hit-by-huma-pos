@@ -16,7 +16,7 @@ router.get('/dashboard', async (req, res, next) => {
     let paramIndex = 1;
 
     if (locationId) {
-      locationFilter = ` AND location_id = $${paramIndex++}`;
+      locationFilter = ` AND s.location_id = $${paramIndex++}`;
       params.push(parseInt(locationId));
     }
 
