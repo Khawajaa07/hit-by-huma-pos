@@ -87,7 +87,7 @@ router.get('/dashboard', async (req, res, next) => {
 
     // Hourly sales
     const hourlyResult = await pool.query(
-      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(total_amount), 0) as revenue
+      `SELECT EXTRACT(HOUR FROM s.created_at) as hour, COALESCE(SUM(s.total_amount), 0) as revenue
        FROM sales s
        WHERE s.status = 'completed' ${timeFilter} ${locationFilter}
        GROUP BY EXTRACT(HOUR FROM s.created_at)
