@@ -107,7 +107,9 @@ export default function POS() {
       const response = await api.get(`/products?${params}`);
       return response.data;
     },
-    enabled: true
+    enabled: true,
+    staleTime: 30 * 1000, // 30 seconds - refresh product list more frequently
+    refetchOnWindowFocus: true // Refresh when switching back to POS tab
   });
 
   // Normalize products data - handle both quick search results and regular products
@@ -311,24 +313,33 @@ export default function POS() {
         {/* Search & Categories */}
         <div className="p-4 bg-white border-b space-y-4">
           {/* Search Bar */}
-          <div className="relative">
-            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products or scan barcode..."
-              className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
-                <XMarkIcon className="w-5 h-5 text-gray-400" />
-              </button>
-            )}
+          <div className="relative flex gap-2">
+            <div className="relative flex-1">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search products or scan barcode..."
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                >
+                  <XMarkIcon className="w-5 h-5 text-gray-400" />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => refetchProducts()}
+              className="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              title="Refresh Products"
+            >
+              <ArrowPathIcon className="w-5 h-5 text-gray-600" />
+            </button>
           </div>
 
           {/* Categories */}
