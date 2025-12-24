@@ -22,9 +22,13 @@ export const useCartStore = create(
         );
 
         if (existingIndex !== -1) {
-          // Update quantity
+          // Update quantity and ensure stock is updated
           const newItems = [...items];
           newItems[existingIndex].quantity += 1;
+          // Update stock in case it was missing or changed
+          if (product.stock !== undefined && product.stock !== null) {
+            newItems[existingIndex].stock = product.stock;
+          }
           set({ items: newItems });
         } else {
           // Add new item

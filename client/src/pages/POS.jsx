@@ -221,7 +221,7 @@ export default function POS() {
     // Normalize product data from either quick search or regular products endpoint
     // Quick search returns: variant_id, sku, barcode, variant_name, price, product_name, product_code, product_id, stock
     // Regular products returns: id, code, name, basePrice, variantId, sku, barcode, totalStock
-    const stock = parseInt(product.stock) ?? parseInt(product.totalStock) ?? 0;
+    const stock = parseInt(product.stock) || parseInt(product.totalStock) || 0;
 
     const normalizedItem = {
       variantId: product.variantId || product.variant_id || (product.variants?.[0]?.id),
