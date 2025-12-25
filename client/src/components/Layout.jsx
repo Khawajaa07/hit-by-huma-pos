@@ -219,7 +219,7 @@ export default function Layout() {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto pt-16 lg:pt-0">
           <Suspense fallback={<PageLoader />}>
             <Outlet />
           </Suspense>
