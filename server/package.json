@@ -22,6 +22,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "node-cache": "^5.1.2",
+    "node-thermal-printer": "^4.5.0",
     "pg": "^8.11.3",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1",
@@ -32,7 +33,6 @@
     "escpos": "^3.0.0-alpha.6",
     "escpos-usb": "^3.0.0-alpha.4",
     "ioredis": "^5.3.2",
-    "node-thermal-printer": "^4.5.0",
     "twilio": "^4.19.3"
   },
   "devDependencies": {

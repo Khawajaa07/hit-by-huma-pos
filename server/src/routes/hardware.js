@@ -16,22 +16,27 @@ router.get('/printer/status', async (req, res) => {
   }
 });
 
-// Print receipt (mock for cloud deployment)
+// Print receipt
 router.post('/printer/receipt', authorize('pos'), async (req, res) => {
-  const { saleId, items, totals, payment, customerName } = req.body;
+  const { sale } = req.body;
 
-  // In cloud deployment, we log the receipt data and return success
-  console.log('Receipt print requested:', { saleId, itemCount: items?.length });
-
-  res.json({
-    success: true,
-    printed: false,
-    message: 'Receipt saved. Hardware printing not available in cloud deployment.',
-    receiptData: {
-      saleId,
-      timestamp: new Date().toISOString()
-    }
-  });
+  try {
+    const result = await printerService.printReceipt(sale);
+    res.json({
+      success: true,
+      printed: result.printed || false,
+      method: result.isCloudMode ? 'cloud' : 'usb',
+      message: result.message || (result.printed ? 'Receipt printed successfully' : 'Cloud mode - use browser print')
+    });
+  } catch (error) {
+    console.error('Receipt print failed:', error);
+    res.status(500).json({
+      success: false,
+      printed: false,
+      error: error.message,
+      message: 'Receipt printing failed. Please try browser print or check printer connection.'
+    });
+  }
 });
 
 
