@@ -16,52 +16,77 @@ import {
   XMarkIcon,
   HomeIcon,
   PresentationChartLineIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 
-const navItems = [
-  { path: '/dashboard', name: 'Dashboard', icon: HomeIcon },
-  { path: '/pos', name: 'POS Terminal', icon: ShoppingCartIcon },
-  { path: '/products', name: 'Products', icon: CubeIcon },
-  { path: '/inventory', name: 'Inventory', icon: ArchiveBoxIcon },
-  { path: '/customers', name: 'Customers', icon: UsersIcon },
-  { path: '/reports', name: 'Reports', icon: PresentationChartLineIcon },
-  { path: '/shifts', name: 'Shifts', icon: ClockIcon },
-  { path: '/settings', name: 'Settings', icon: Cog6ToothIcon },
+// Navigation items with role restrictions
+const allNavItems = [
+  { path: '/dashboard', name: 'Dashboard', icon: HomeIcon, roles: ['admin', 'manager'] },
+  { path: '/pos', name: 'POS Terminal', icon: ShoppingCartIcon, roles: ['admin', 'manager', 'cashier', 'salesman'] },
+  { path: '/products', name: 'Products', icon: CubeIcon, roles: ['admin', 'manager', 'salesman'], viewOnly: ['salesman'] },
+  { path: '/inventory', name: 'Inventory', icon: ArchiveBoxIcon, roles: ['admin', 'manager', 'inventory', 'salesman'], viewOnly: ['salesman'] },
+  { path: '/customers', name: 'Customers', icon: UsersIcon, roles: ['admin', 'manager', 'cashier', 'salesman'] },
+  { path: '/reports', name: 'Reports', icon: PresentationChartLineIcon, roles: ['admin', 'manager'] },
+  { path: '/shifts', name: 'Shifts', icon: ClockIcon, roles: ['admin', 'manager'] },
+  { path: '/settings', name: 'Settings', icon: Cog6ToothIcon, roles: ['admin'] },
 ];
 
 export default function Layout() {
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { user, logout, currentShift, isSalesman } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentShift, setCurrentShift] = useState(null);
+  const [activeShift, setActiveShift] = useState(null);
 
-  // Fetch current shift on mount
+  // Get user role
+  const userRole = user?.role?.toLowerCase() || 'salesman';
+  const isUserSalesman = userRole === 'salesman' || isSalesman?.();
+
+  // Filter nav items based on user role
+  const navItems = allNavItems.filter(item => item.roles.includes(userRole));
+
+  // Fetch current shift on mount (for non-salesmen, salesmen get shift from auth)
   useEffect(() => {
-    const fetchShift = async () => {
-      try {
-        const response = await api.get('/shifts/current');
-        if (response.data) {
-          setCurrentShift(response.data);
+    if (isUserSalesman && currentShift) {
+      setActiveShift(currentShift);
+    } else {
+      const fetchShift = async () => {
+        try {
+          const response = await api.get('/shifts/current');
+          if (response.data) {
+            setActiveShift(response.data);
+          }
+        } catch (error) {
+          // No active shift
         }
-      } catch (error) {
-        // No active shift
-      }
-    };
-    fetchShift();
-    const interval = setInterval(fetchShift, 60000);
-    return () => clearInterval(interval);
-  }, []);
+      };
+      fetchShift();
+      const interval = setInterval(fetchShift, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [isUserSalesman, currentShift]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
+  };
+
+  // Get user display name
+  const getUserDisplayName = () => {
+    if (user?.firstName && user?.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
+    return user?.firstName || user?.employeeCode || 'User';
+  };
+
+  const getUserInitial = () => {
+    return user?.firstName?.charAt(0) || user?.employeeCode?.charAt(0) || 'U';
   };
 
   return (
     <div className="flex h-screen bg-gray-100">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -85,7 +110,7 @@ export default function Layout() {
                 <p className="text-gray-400 text-xs">Point of Sale</p>
               </div>
             </div>
-            <button 
+            <button
               className="lg:hidden text-gray-400 hover:text-white"
               onClick={() => setSidebarOpen(false)}
             >
@@ -95,30 +120,41 @@ export default function Layout() {
 
           {/* Shift Status */}
           <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700">
-            <div className={`flex items-center text-sm ${currentShift ? 'text-green-400' : 'text-gray-400'}`}>
+            <div className={`flex items-center text-sm ${activeShift || currentShift ? 'text-green-400' : 'text-gray-400'}`}>
               <ClockIcon className="w-4 h-4 mr-2" />
-              <span>{currentShift ? 'Shift Active' : 'No Active Shift'}</span>
+              <span>{activeShift || currentShift ? 'Shift Active' : 'No Active Shift'}</span>
             </div>
+            {isUserSalesman && (
+              <div className="text-xs text-yellow-400 mt-1">
+                Salesman Mode
+              </div>
+            )}
           </div>
 
           {/* Navigation */}
           <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                onClick={() => setSidebarOpen(false)}
-                className={({ isActive }) => `
-                  flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors
-                  ${isActive 
-                    ? 'bg-primary-600 text-white' 
-                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'}
-                `}
-              >
-                <item.icon className="w-5 h-5 mr-3" />
-                {item.name}
-              </NavLink>
-            ))}
+            {navItems.map((item) => {
+              const isViewOnly = item.viewOnly?.includes(userRole);
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) => `
+                    flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors
+                    ${isActive
+                      ? 'bg-primary-600 text-white'
+                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'}
+                  `}
+                >
+                  <item.icon className="w-5 h-5 mr-3" />
+                  <span className="flex-1">{item.name}</span>
+                  {isViewOnly && (
+                    <EyeIcon className="w-4 h-4 text-yellow-400" title="View Only" />
+                  )}
+                </NavLink>
+              );
+            })}
           </nav>
 
           {/* User Info */}
@@ -127,14 +163,14 @@ export default function Layout() {
               <div className="flex items-center">
                 <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
                   <span className="text-primary-400 font-semibold">
-                    {user?.name?.charAt(0) || 'U'}
+                    {getUserInitial()}
                   </span>
                 </div>
                 <div className="ml-3">
                   <p className="text-white text-sm font-medium">
-                    {user?.name || 'User'}
+                    {getUserDisplayName()}
                   </p>
-                  <p className="text-gray-400 text-xs">{user?.role || 'Staff'}</p>
+                  <p className="text-gray-400 text-xs capitalize">{userRole}</p>
                 </div>
               </div>
               <button

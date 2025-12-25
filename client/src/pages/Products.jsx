@@ -13,18 +13,24 @@ import {
   PhotoIcon,
   DocumentDuplicateIcon,
   TagIcon,
-  PrinterIcon
+  PrinterIcon,
+  EyeIcon
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../stores/authStore';
 
 export default function Products() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [expandedProducts, setExpandedProducts] = useState(new Set());
+
+  // Check if user is salesman (view-only mode)
+  const isSalesman = user?.role?.toLowerCase() === 'salesman' || user?.isSalesman;
 
   // Fetch products
   const { data: productsData, isLoading, refetch } = useQuery({
@@ -37,7 +43,7 @@ export default function Products() {
       return api.get(`/products?${params}`).then(res => res.data);
     }
   });
-  
+
   // Extract products array from response
   const products = productsData?.products || productsData || [];
 
@@ -46,7 +52,7 @@ export default function Products() {
     queryKey: ['categories'],
     queryFn: () => api.get('/products/categories/list').then(res => res.data)
   });
-  
+
   // Extract categories and transform to consistent format (support both SQL Server and PostgreSQL formats)
   const rawCategories = Array.isArray(categoriesData) ? categoriesData : (categoriesData?.categories || []);
   const categories = rawCategories.map(cat => ({
@@ -91,13 +97,13 @@ export default function Products() {
       toast.error('Product has no barcode. Edit product to generate one.');
       return;
     }
-    
+
     // Ask for quantity and printer type
     const quantity = prompt('How many labels to print?', '1');
     if (!quantity) return;
-    
+
     const useLabelPrinter = confirm('Use label printer?\n\nClick OK for Label Printer (small labels)\nClick Cancel for Regular Printer (A4 sheet)');
-    
+
     printProductLabels({
       name: product.name,
       barcode: barcode,
@@ -206,19 +212,29 @@ export default function Products() {
 
   return (
     <div className="p-6">
+      {/* View Only Banner for Salesmen */}
+      {isSalesman && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-2">
+          <EyeIcon className="w-5 h-5 text-yellow-600" />
+          <span className="text-yellow-800 text-sm font-medium">View Only Mode - You can view products but cannot add, edit, or delete them.</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
-          <p className="text-gray-500">Manage your product catalog and variants</p>
+          <p className="text-gray-500">{isSalesman ? 'View product catalog and details' : 'Manage your product catalog and variants'}</p>
         </div>
-        <button
-          onClick={() => setShowProductModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <PlusIcon className="w-5 h-5" />
-          Add Product
-        </button>
+        {!isSalesman && (
+          <button
+            onClick={() => setShowProductModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <PlusIcon className="w-5 h-5" />
+            Add Product
+          </button>
+        )}
       </div>
 
       {/* Filters */}
@@ -344,19 +360,17 @@ export default function Products() {
                     </td>
                     <td className="px-6 py-4 font-medium">${parseFloat(product.basePrice || 0).toFixed(2)}</td>
                     <td className="px-6 py-4">
-                      <span className={`font-medium ${
-                        product.totalStock > 10 ? 'text-green-600' :
-                        product.totalStock > 0 ? 'text-yellow-600' : 'text-red-600'
-                      }`}>
+                      <span className={`font-medium ${product.totalStock > 10 ? 'text-green-600' :
+                          product.totalStock > 0 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
                         {product.totalStock || 0}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        product.isActive
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${product.isActive
                           ? 'bg-green-100 text-green-700'
                           : 'bg-gray-100 text-gray-600'
-                      }`}>
+                        }`}>
                         {product.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </td>
@@ -369,20 +383,24 @@ export default function Products() {
                         >
                           <PrinterIcon className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => handleEdit(product)}
-                          className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg"
-                          title="Edit"
-                        >
-                          <PencilIcon className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(product)}
-                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg"
-                          title="Delete"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
+                        {!isSalesman && (
+                          <>
+                            <button
+                              onClick={() => handleEdit(product)}
+                              className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg"
+                              title="Edit"
+                            >
+                              <PencilIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(product)}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg"
+                              title="Delete"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -415,19 +433,17 @@ export default function Products() {
                         ${parseFloat(variant.price || product.basePrice || 0).toFixed(2)}
                       </td>
                       <td className="px-6 py-3">
-                        <span className={`text-sm font-medium ${
-                          variant.stock > 10 ? 'text-green-600' :
-                          variant.stock > 0 ? 'text-yellow-600' : 'text-red-600'
-                        }`}>
+                        <span className={`text-sm font-medium ${variant.stock > 10 ? 'text-green-600' :
+                            variant.stock > 0 ? 'text-yellow-600' : 'text-red-600'
+                          }`}>
                           {variant.stock || 0}
                         </span>
                       </td>
                       <td className="px-6 py-3">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          variant.isActive
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${variant.isActive
                             ? 'bg-green-100 text-green-700'
                             : 'bg-gray-100 text-gray-600'
-                        }`}>
+                          }`}>
                           {variant.isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>
@@ -519,7 +535,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
     const barcode = productData.barcode || productData.sku;
     const name = productData.name;
     const price = productData.price;
-    
+
     // Create label HTML
     const labelHTML = `
       <!DOCTYPE html>
@@ -658,7 +674,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
         const response = await api.post('/products', payload);
         toast.success('Product created successfully');
         savedProduct = { ...payload, id: response.data?.productId };
-        
+
         // Show label printing modal for new products
         setCreatedProduct({
           name: formData.name,
@@ -669,7 +685,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
         setLoading(false);
         return; // Don't close yet, wait for label decision
       }
-      
+
       // Force refresh the products list
       await queryClient.invalidateQueries({ queryKey: ['products'] });
       onSave();
@@ -696,7 +712,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
   };
 
   const generateSKU = () => {
-    const prefix = formData.category_id ? 
+    const prefix = formData.category_id ?
       categories?.find(c => c.id === parseInt(formData.category_id))?.name?.substring(0, 3).toUpperCase() : 'PRD';
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newSku = `${prefix}-${random}`;
@@ -727,7 +743,7 @@ function ProductModal({ product, categories, onClose, onSave }) {
   };
 
   const updateVariant = (id, field, value) => {
-    setVariants(variants.map(v => 
+    setVariants(variants.map(v =>
       v.id === id ? { ...v, [field]: value } : v
     ));
   };
@@ -764,21 +780,19 @@ function ProductModal({ product, categories, onClose, onSave }) {
         <div className="flex border-b px-6">
           <button
             onClick={() => setActiveTab('basic')}
-            className={`px-4 py-3 font-medium border-b-2 -mb-px ${
-              activeTab === 'basic'
+            className={`px-4 py-3 font-medium border-b-2 -mb-px ${activeTab === 'basic'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500'
-            }`}
+              }`}
           >
             Basic Info
           </button>
           <button
             onClick={() => setActiveTab('variants')}
-            className={`px-4 py-3 font-medium border-b-2 -mb-px ${
-              activeTab === 'variants'
+            className={`px-4 py-3 font-medium border-b-2 -mb-px ${activeTab === 'variants'
                 ? 'border-primary-600 text-primary-600'
                 : 'border-transparent text-gray-500'
-            }`}
+              }`}
           >
             Variants
           </button>
@@ -935,14 +949,12 @@ function ProductModal({ product, categories, onClose, onSave }) {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, has_variants: !formData.has_variants })}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    formData.has_variants ? 'bg-primary-600' : 'bg-gray-300'
-                  }`}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${formData.has_variants ? 'bg-primary-600' : 'bg-gray-300'
+                    }`}
                 >
                   <span
-                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      formData.has_variants ? 'left-7' : 'left-1'
-                    }`}
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${formData.has_variants ? 'left-7' : 'left-1'
+                      }`}
                   />
                 </button>
               </div>
@@ -956,14 +968,12 @@ function ProductModal({ product, categories, onClose, onSave }) {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, is_active: !formData.is_active })}
-                  className={`relative w-12 h-6 rounded-full transition-colors ${
-                    formData.is_active ? 'bg-primary-600' : 'bg-gray-300'
-                  }`}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${formData.is_active ? 'bg-primary-600' : 'bg-gray-300'
+                    }`}
                 >
                   <span
-                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      formData.is_active ? 'left-7' : 'left-1'
-                    }`}
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${formData.is_active ? 'left-7' : 'left-1'
+                      }`}
                   />
                 </button>
               </div>

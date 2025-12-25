@@ -17,14 +17,19 @@ import {
 } from '@heroicons/react/24/outline';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../stores/authStore';
 
 export default function Customers() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  // Check if user is salesman (can only add, not edit/delete)
+  const isSalesman = user?.role?.toLowerCase() === 'salesman' || user?.isSalesman;
 
   // Fetch customers
   const { data: customersData, isLoading } = useQuery({
@@ -50,7 +55,7 @@ export default function Customers() {
     wallet_balance: c.WalletBalance,
     loyalty_points: c.LoyaltyPoints,
     // Calculate days since last purchase
-    last_purchase_days: c.LastVisitAt 
+    last_purchase_days: c.LastVisitAt
       ? Math.floor((new Date() - new Date(c.LastVisitAt)) / (1000 * 60 * 60 * 24))
       : 999
   }));
@@ -215,16 +220,18 @@ export default function Customers() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEdit(customer);
-                  }}
-                  className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg self-start"
-                  title="Edit customer"
-                >
-                  <PencilIcon className="w-4 h-4" />
-                </button>
+                {!isSalesman && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEdit(customer);
+                    }}
+                    className="p-2 text-gray-400 hover:text-primary-600 hover:bg-gray-100 rounded-lg self-start"
+                    title="Edit customer"
+                  >
+                    <PencilIcon className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4 pt-4 border-t mt-2">
@@ -314,7 +321,7 @@ function CustomerModal({ customer, onClose, onSave }) {
         notes: formData.notes,
         smsOptIn: formData.sms_opt_in
       };
-      
+
       if (customer) {
         await api.put(`/customers/${customer.customer_id}`, payload);
         toast.success('Customer updated successfully');
@@ -435,14 +442,12 @@ function CustomerModal({ customer, onClose, onSave }) {
             <button
               type="button"
               onClick={() => setFormData({ ...formData, sms_opt_in: !formData.sms_opt_in })}
-              className={`relative w-12 h-6 rounded-full transition-colors ${
-                formData.sms_opt_in ? 'bg-primary-600' : 'bg-gray-300'
-              }`}
+              className={`relative w-12 h-6 rounded-full transition-colors ${formData.sms_opt_in ? 'bg-primary-600' : 'bg-gray-300'
+                }`}
             >
               <span
-                className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                  formData.sms_opt_in ? 'left-7' : 'left-1'
-                }`}
+                className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${formData.sms_opt_in ? 'left-7' : 'left-1'
+                  }`}
               />
             </button>
           </div>
@@ -580,11 +585,10 @@ function CustomerDetailsModal({ customerId, onClose }) {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-3 font-medium capitalize border-b-2 -mb-px ${
-                activeTab === tab
+              className={`px-4 py-3 font-medium capitalize border-b-2 -mb-px ${activeTab === tab
                   ? 'border-primary-600 text-primary-600'
                   : 'border-transparent text-gray-500'
-              }`}
+                }`}
             >
               {tab}
             </button>
@@ -615,11 +619,10 @@ function CustomerDetailsModal({ customerId, onClose }) {
               </div>
               <div>
                 <p className="text-sm text-gray-500 mb-1">SMS Notifications</p>
-                <span className={`px-2 py-1 text-xs rounded-full ${
-                  customer?.sms_opt_in
+                <span className={`px-2 py-1 text-xs rounded-full ${customer?.sms_opt_in
                     ? 'bg-green-100 text-green-700'
                     : 'bg-gray-100 text-gray-600'
-                }`}>
+                  }`}>
                   {customer?.sms_opt_in ? 'Opted In' : 'Opted Out'}
                 </span>
               </div>
