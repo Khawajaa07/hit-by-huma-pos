@@ -25,7 +25,7 @@ const hardwareRoutes = require('./routes/hardware');
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.IO for real-time updates (Customer Facing Display, Live Inventory)
+// Socket.IO for real-time updates (Live Inventory, Barcode Scanner)
 const io = new Server(httpServer, {
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
@@ -130,11 +130,6 @@ io.on('connection', (socket) => {
     logger.info(`Socket ${socket.id} joined location-${locationId}`);
   });
 
-  // Customer Facing Display - Join terminal
-  socket.on('join-cfd', (terminalId) => {
-    socket.join(`cfd-${terminalId}`);
-    logger.info(`CFD connected: ${terminalId}`);
-  });
 
   socket.on('disconnect', () => {
     logger.info(`Client disconnected: ${socket.id}`);

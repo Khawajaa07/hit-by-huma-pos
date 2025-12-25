@@ -19,10 +19,10 @@ router.get('/printer/status', async (req, res) => {
 // Print receipt (mock for cloud deployment)
 router.post('/printer/receipt', authorize('pos'), async (req, res) => {
   const { saleId, items, totals, payment, customerName } = req.body;
-  
+
   // In cloud deployment, we log the receipt data and return success
   console.log('Receipt print requested:', { saleId, itemCount: items?.length });
-  
+
   res.json({
     success: true,
     printed: false,
@@ -34,33 +34,13 @@ router.post('/printer/receipt', authorize('pos'), async (req, res) => {
   });
 });
 
-// Open cash drawer (mock for cloud deployment)
-router.post('/drawer/open', authorize('pos'), async (req, res) => {
-  console.log('Cash drawer open requested by user:', req.user?.employee_code);
-  try {
-    const result = await printerService.openCashDrawer();
-    res.json({ success: true, opened: !!result });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to open cash drawer', error: error.message });
-  }
-});
-
-// Alias endpoint used by client code
-router.post('/cash-drawer/open', authorize('pos'), async (req, res) => {
-  try {
-    const result = await printerService.openCashDrawer();
-    res.json({ success: true, opened: !!result });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to open cash drawer', error: error.message });
-  }
-});
 
 // Print label (mock for cloud deployment)
 router.post('/label/print', authorize('inventory'), async (req, res) => {
   const { barcode, productName, price, quantity } = req.body;
-  
+
   console.log('Label print requested:', { barcode, productName, quantity });
-  
+
   try {
     const result = await printerService.printLabel({ sku: barcode || productName, barcode, name: productName, price, quantity });
     res.json({ success: true, printed: !!result, labels: quantity || 1 });
@@ -115,9 +95,6 @@ router.get('/status', async (req, res) => {
     labelPrinter: {
       connected: false,
       type: 'none'
-    },
-    cashDrawer: {
-      connected: false
     },
     barcodeScanner: {
       mode: 'keyboard',
